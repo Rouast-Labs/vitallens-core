@@ -1,0 +1,33 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Maturin / PyO3 artifacts
+*.so
+*.dylib
+*.dll
+
+# Web / Wasm
+pkg/
+
+# UniFFI / Mobile Generated Bindings
+# (Optional: Comment this out if you want to version control the generated Swift files)
+bindings/swift/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Mac
+.DS_Store
