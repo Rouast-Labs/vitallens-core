@@ -3,6 +3,7 @@ pub mod fft;
 pub mod peaks;
 pub mod rate;
 pub mod stubs;
+pub mod hrv;
 
 // Remove the old dummy process_batch function if it conflicts, 
 // or keep it for backward compat until we fully replace it.
