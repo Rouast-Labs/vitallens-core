@@ -1,15 +1,17 @@
+use std::collections::VecDeque;
+
 #[derive(Debug, Clone)]
 pub struct SignalBuffer {
-    pub sum: Vec<f32>,
-    pub count: Vec<u32>,
+    pub sum: VecDeque<f32>,
+    pub count: VecDeque<u32>,
     pub unit: Option<String>,
 }
 
 impl SignalBuffer {
     pub fn new() -> Self {
         Self {
-            sum: Vec::new(),
-            count: Vec::new(),
+            sum: VecDeque::new(),
+            count: VecDeque::new(),
             unit: None,
         }
     }
@@ -24,12 +26,12 @@ impl SignalBuffer {
             return;
         }
 
-        // 1. Handle Overlap
-        // We only overlap what we actually have history for.
-        let valid_overlap = overlap.min(self.sum.len()).min(new_count);
+        // 1. Handle Overlap (Add to existing tail)
+        let current_len = self.sum.len();
+        let valid_overlap = overlap.min(current_len).min(new_count);
 
         if valid_overlap > 0 {
-            let start_idx = self.sum.len() - valid_overlap;
+            let start_idx = current_len - valid_overlap;
             for i in 0..valid_overlap {
                 let new_val = data[i];
                 if !new_val.is_nan() {
@@ -42,13 +44,29 @@ impl SignalBuffer {
         // 2. Append New Data
         if new_count > valid_overlap {
             let new_slice = &data[valid_overlap..];
+            
+            let mut last_valid = if let Some(&last) = self.sum.back() {
+                 let c = *self.count.back().unwrap_or(&1);
+                 if c > 0 { last / c as f32 } else { 0.0 }
+            } else {
+                0.0 
+            };
+
             for &val in new_slice {
-                self.sum.push(if val.is_nan() { 0.0 } else { val });
-                self.count.push(1);
+                let val_to_store = if val.is_nan() {
+                    last_valid
+                } else {
+                    last_valid = val;
+                    val
+                };
+                
+                self.sum.push_back(val_to_store);
+                self.count.push_back(1);
             }
         }
     }
 
+    /// Computes the average and returns a linear Vec<f32>.
     pub fn compute_average(&self) -> Vec<f32> {
         self.sum
             .iter()
@@ -57,6 +75,7 @@ impl SignalBuffer {
             .collect()
     }
 
+    /// Removes old data from the front.
     pub fn prune(&mut self, keep_count: usize) {
         if self.sum.len() > keep_count {
             let remove_count = self.sum.len() - keep_count;
