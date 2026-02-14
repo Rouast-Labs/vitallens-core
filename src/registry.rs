@@ -10,8 +10,8 @@ pub enum VitalType {
 pub struct DerivationConfig {
     pub source_signal: String,
     pub method: CalculationMethod,
-    pub min_required_seconds: f32, // TODO: Rename
-    pub optimal_window_seconds: f32, // TODO: Rename
+    pub min_window_seconds: f32, // TODO: Rename
+    pub preferred_window_seconds: f32, // TODO: Rename
     pub min_value: f32,
     pub max_value: f32,
     pub order: u8, 
@@ -92,8 +92,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 method: CalculationMethod::Rate(RateStrategy::Periodogram { 
                     target_res_hz: 0.005
                 }),
-                min_required_seconds: 5.0,
-                optimal_window_seconds: 10.0,
+                min_window_seconds: 5.0,
+                preferred_window_seconds: 10.0,
                 min_value: 40.0,
                 max_value: 240.0,
                 order: 0,
@@ -110,8 +110,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 method: CalculationMethod::Rate(RateStrategy::Periodogram { 
                     target_res_hz: 0.01
                 }),
-                min_required_seconds: 10.0,
-                optimal_window_seconds: 30.0,
+                min_window_seconds: 10.0,
+                preferred_window_seconds: 30.0,
                 min_value: 4.0,
                 max_value: 60.0,
                 order: 0,
@@ -126,8 +126,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Sdnn),
-                min_required_seconds: 20.0,
-                optimal_window_seconds: 60.0,
+                min_window_seconds: 20.0,
+                preferred_window_seconds: 60.0,
                 min_value: 1.0,
                 max_value: 200.0,
                 order: 1,
@@ -142,8 +142,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Rmssd),
-                min_required_seconds: 20.0,
-                optimal_window_seconds: 60.0,
+                min_window_seconds: 20.0,
+                preferred_window_seconds: 60.0,
                 min_value: 1.0,
                 max_value: 200.0,
                 order: 1,
@@ -158,8 +158,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::LfHf),
-                min_required_seconds: 55.0,
-                optimal_window_seconds: 120.0,
+                min_window_seconds: 55.0,
+                preferred_window_seconds: 120.0,
                 min_value: 0.0,
                 max_value: 10.0,
                 order: 1,
@@ -174,8 +174,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 source_signal: "spo2".to_string(),
                 method: CalculationMethod::Average,
-                min_required_seconds: 1.0,
-                optimal_window_seconds: 5.0,
+                min_window_seconds: 1.0,
+                preferred_window_seconds: 5.0,
                 min_value: 70.0,
                 max_value: 100.0,
                 order: 0,
@@ -202,8 +202,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 DerivationConfig {
                     source_signal: "abp_waveform".to_string(),
                     method: CalculationMethod::BpSystolic, 
-                    min_required_seconds: 5.0,
-                    optimal_window_seconds: 10.0,
+                    min_window_seconds: 5.0,
+                    preferred_window_seconds: 10.0,
                     min_value: 60.0,
                     max_value: 200.0,
                     order: 1,
@@ -211,8 +211,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 DerivationConfig {
                     source_signal: "sbp".to_string(),
                     method: CalculationMethod::Average,
-                    min_required_seconds: 5.0,
-                    optimal_window_seconds: 10.0,
+                    min_window_seconds: 5.0,
+                    preferred_window_seconds: 10.0,
                     min_value: 60.0,
                     max_value: 200.0,
                     order: 1,
@@ -229,8 +229,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 DerivationConfig {
                     source_signal: "abp_waveform".to_string(),
                     method: CalculationMethod::BpDiastolic, 
-                    min_required_seconds: 5.0,
-                    optimal_window_seconds: 10.0,
+                    min_window_seconds: 5.0,
+                    preferred_window_seconds: 10.0,
                     min_value: 40.0,
                     max_value: 120.0,
                     order: 1,
@@ -238,8 +238,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 DerivationConfig {
                     source_signal: "dbp".to_string(),
                     method: CalculationMethod::Average,
-                    min_required_seconds: 5.0,
-                    optimal_window_seconds: 10.0,
+                    min_window_seconds: 5.0,
+                    preferred_window_seconds: 10.0,
                     min_value: 40.0,
                     max_value: 120.0,
                     order: 1,

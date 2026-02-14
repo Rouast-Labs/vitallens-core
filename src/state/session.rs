@@ -179,17 +179,17 @@ impl SessionCore {
                     if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
                         let full_data = source_buf.compute_average();
                         let available_frames = full_data.len();
-                        let min_frames = (cfg.min_required_seconds * fs) as usize;
+                        let min_frames = (cfg.min_window_seconds * fs) as usize;
                         if available_frames >= min_frames {
                             let take_frames = match mode {
                                 WaveformMode::Global => available_frames,
                                 _ => {
                                     if let WaveformMode::Windowed { seconds } = mode {
-                                        let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
-                                        optimal_frames.min(available_frames)
+                                        let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
+                                        preferred_frames.min(available_frames)
                                     } else {
-                                        let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
-                                        optimal_frames.min(available_frames)
+                                        let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
+                                        preferred_frames.min(available_frames)
                                     }
                                 }
                             };
