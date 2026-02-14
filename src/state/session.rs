@@ -28,7 +28,7 @@ impl Session {
         }
         // Sort by order
         resolved_metas.sort_by_key(|m| {
-            m.derivation.as_ref().map(|d| d.order).unwrap_or(0)
+            m.derivations.first().map(|d| d.order).unwrap_or(0)
         });
         let active_vitals = resolved_metas.into_iter().map(|m| m.id).collect();
         Self {
@@ -120,13 +120,41 @@ impl Session {
         }
     }
 
+    fn run_derivation_method(
+        &self,
+        cfg: &crate::registry::DerivationConfig,
+        slice: &[f32],
+        fs: f32,
+        start_idx: usize,
+        available_frames: usize,
+    ) -> (f32, f32) {
+        match &cfg.method {
+            CalculationMethod::Rate(strategy) => {
+                let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
+                let res = crate::signal::rate::estimate_rate(slice, fs, bounds, *strategy, None);
+                (res.value, res.confidence)
+            },
+            CalculationMethod::HrvFromPeaks(metric) => {
+                let ts_slice = &self.timestamps[start_idx..];
+                let conf_data = self.signal_confs.get(&cfg.source_signal)
+                    .map(|b| b.compute_average())
+                    .unwrap_or_else(|| vec![1.0; available_frames]);
+                let conf_slice = &conf_data[start_idx..];
+                crate::signal::hrv::estimate_hrv(slice, fs, *metric, ts_slice, conf_slice)
+            },
+            CalculationMethod::Average => crate::signal::calculate_average(slice),
+            CalculationMethod::BpSystolic => crate::signal::bp::extract_systolic_pressure(slice, fs),
+            CalculationMethod::BpDiastolic => crate::signal::bp::extract_diastolic_pressure(slice, fs),
+        }
+    }
+
     fn perform_derivations(&self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-        let fs = self.config.fps_target;
+        let fs = self.config.fps_target; // TODO: Use derived fs instead. This may be wrong
 
         for vital_id in &self.active_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
-                if let Some(cfg) = &meta.derivation {
+                for cfg in &meta.derivations {
                     if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
                         let full_data = source_buf.compute_average();
                         let available_frames = full_data.len();
@@ -142,35 +170,18 @@ impl Session {
                             let start_idx = available_frames - take_frames;
                             let slice = &full_data[start_idx..];
 
-                            let (val, conf) = match &cfg.method {
-                                CalculationMethod::Rate(strategy) => {
-                                    let bounds = crate::signal::rate::RateBounds {
-                                        min: cfg.min_value,
-                                        max: cfg.max_value,
-                                    };
-                                    let res = crate::signal::rate::estimate_rate(
-                                        slice, fs, bounds, *strategy, None
-                                    );
-                                    (res.value, res.confidence)
-                                },
-                                CalculationMethod::HrvFromPeaks(metric) => {
-                                    let ts_slice = &self.timestamps[start_idx..];
-                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
-                                        .map(|b| b.compute_average())
-                                        .unwrap_or_else(|| vec![1.0; available_frames]);
-                                    let conf_slice = &conf_data[start_idx..];
-
-                                    crate::signal::hrv::estimate_hrv(
-                                        slice, fs, *metric, ts_slice, conf_slice
-                                    )
-                                },
-                                CalculationMethod::Average => {
-                                    crate::signal::calculate_average(slice)
-                                }
-                            };
+                            // Run the specialized math
+                            let (val, conf) = self.run_derivation_method(
+                                cfg,
+                                slice,
+                                fs,
+                                start_idx,
+                                available_frames
+                            );
 
                             if val >= cfg.min_value && val <= cfg.max_value {
                                 results.insert(vital_id.clone(), (val, conf));
+                                break;
                             }
                         }
                     }
