@@ -26,7 +26,6 @@ vitallens-core/
 ├── Cargo.toml                 # Master config
 ├── pyproject.toml             # Python build config
 └── uniffi.toml                # Mobile binding config
-
 ```
 
 ## Build Instructions
@@ -38,7 +37,6 @@ Builds the Rust core as a Python extension and installs it into your current env
 ```bash
 # Requires active venv
 maturin develop --features python
-
 ```
 
 ### 2. iOS (Native Mobile)
@@ -56,7 +54,6 @@ cargo build --release --target x86_64-apple-ios --lib
 
 # For Device (iPhone)
 # cargo build --release --target aarch64-apple-ios --lib
-
 ```
 
 **Step B: Generate Swift Bindings**
@@ -66,7 +63,6 @@ cargo run --features=uniffi/cli --bin uniffi-bindgen generate \
     --library target/x86_64-apple-ios/release/libvitallens_core.dylib \
     --language swift \
     --out-dir bindings/swift
-
 ```
 
 ### 3. Web (Wasm)
@@ -75,7 +71,6 @@ Compiles to WebAssembly for use in the browser.
 
 ```bash
 wasm-pack build --target web --no-default-features
-
 ```
 
 ## Architecture Notes
