@@ -144,16 +144,25 @@ impl Session {
                             let start_idx = available_frames - take_frames;
                             let slice = &full_data[start_idx..];
 
-                            let (val, conf) = match cfg.method {
-                                CalculationMethod::RateFromFFT => {
-                                    crate::signal::stubs::estimate_rate_fft(
-                                        slice, fs, cfg.min_value, cfg.max_value
-                                    )
+                            let (val, conf) = match &cfg.method {
+                                CalculationMethod::Rate(strategy) => {
+                                    // 1. Construct bounds from registry config
+                                    let bounds = crate::signal::rate::RateBounds {
+                                        min: cfg.min_value,
+                                        max: cfg.max_value,
+                                    };
+
+                                    // 2. Call generic estimator
+                                    let res = crate::signal::rate::estimate_rate(
+                                        slice, fs, bounds, *strategy, None
+                                    );
+                                    
+                                    (res.value, res.confidence)
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let current_hr = results.get("heart_rate").map(|(v, _)| *v);
                                     crate::signal::stubs::estimate_hrv(
-                                        slice, fs, metric, current_hr
+                                        slice, fs, *metric, current_hr
                                     )
                                 },
                                 CalculationMethod::Average => {

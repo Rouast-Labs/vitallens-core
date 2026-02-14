@@ -10,6 +10,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 # Core
 rustfft = "6.2"
 ndarray = "0.15"
+num-complex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
 thiserror = "1.0"

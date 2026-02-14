@@ -1,3 +1,5 @@
+use crate::signal::rate::RateStrategy;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VitalType {
     Provided,
@@ -15,18 +17,18 @@ pub struct DerivationConfig {
     pub order: u8, 
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum CalculationMethod {
-    RateFromFFT,
-    HrvFromPeaks(HrvMetric),
-    Average,
-}
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HrvMetric {
     Sdnn,
     Rmssd,
     LfHf,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CalculationMethod {
+    Rate(RateStrategy),
+    HrvFromPeaks(HrvMetric),
+    Average,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -72,7 +74,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             vital_type: VitalType::Derived,
             derivation: Some(DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
-                method: CalculationMethod::RateFromFFT,
+                method: CalculationMethod::Rate(RateStrategy::Periodogram { 
+                    target_res_hz: 0.005 
+                }),
                 min_required_seconds: 4.0,
                 optimal_window_seconds: 10.0,
                 min_value: 40.0,

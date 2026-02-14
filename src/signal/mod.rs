@@ -1,6 +1,7 @@
 pub mod filters;
 pub mod fft;
 pub mod peaks;
+pub mod rate;
 pub mod stubs;
 
 // Remove the old dummy process_batch function if it conflicts, 

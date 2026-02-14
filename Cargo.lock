@@ -940,6 +940,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "ndarray",
+ "num-complex",
  "numpy",
  "pyo3",
  "rustfft",
