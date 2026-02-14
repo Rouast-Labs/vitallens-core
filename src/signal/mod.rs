@@ -2,7 +2,6 @@ pub mod filters;
 pub mod fft;
 pub mod peaks;
 pub mod rate;
-pub mod stubs;
 pub mod hrv;
 pub mod bp;
 
