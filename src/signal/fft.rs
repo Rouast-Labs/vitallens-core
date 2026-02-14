@@ -1,40 +1,29 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 
-/// Estimates heart rate using the Periodogram method with zero-padding and parabolic interpolation.
-/// 
-/// * `signal`: Input signal (e.g. PPG)
-/// * `fs`: Sampling frequency
-/// * `min_bpm`, `max_bpm`: Search range
-/// * `target_res_hz`: Target frequency resolution (e.g. 0.005 Hz) for zero-padding.
-/// 
-/// Returns (bpm, confidence/snr).
-pub fn estimate_rate_periodogram(
-    signal: &[f32],
-    fs: f32,
-    min_bpm: f32,
-    max_bpm: f32,
-    target_res_hz: f32,
-) -> (f32, f32) {
+/// Represents the Power Spectral Density of a signal.
+pub struct PsdResult {
+    pub frequencies: Vec<f32>,
+    pub power: Vec<f32>,
+}
+
+/// Core math engine: Computes the Hanning-windowed periodogram with zero-padding.
+pub fn compute_periodogram(signal: &[f32], fs: f32, target_res_hz: f32) -> PsdResult {
     let len = signal.len();
     if len < 2 {
-        return (0.0, 0.0);
+        return PsdResult { frequencies: vec![], power: vec![] };
     }
 
-    // --- 1. Pre-processing ---
-    
-    // A. Detrend (Mean Subtraction)
+    // 1. Detrend (Mean Subtraction)
     let mean: f32 = signal.iter().sum::<f32>() / len as f32;
     let detrended: Vec<f32> = signal.iter().map(|x| x - mean).collect();
 
-    // B. Hanning Window to reduce spectral leakage
+    // 2. Hanning Window
     let windowed: Vec<f32> = detrended.iter().enumerate().map(|(i, &x)| {
         let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (len - 1) as f32).cos());
         x * w
     }).collect();
 
-    // --- 2. Zero Padding ---
-
-    // Calculate N required for target resolution
+    // 3. Zero Padding
     let min_fft_len = (fs / target_res_hz) as usize;
     let fft_len = min_fft_len.max(len).next_power_of_two();
     
@@ -44,82 +33,83 @@ pub fn estimate_rate_periodogram(
     }
     buffer.resize(fft_len, Complex::new(0.0, 0.0));
 
-    // --- 3. FFT ---
-    
+    // 4. FFT
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_len);
     fft.process(&mut buffer);
 
-    // --- 4. Peak Finding ---
-    
+    // 5. Calculate PSD (Power)
     let num_bins = fft_len / 2;
     let freq_per_bin = fs / fft_len as f32;
     
-    let min_bin = (min_bpm / 60.0 / freq_per_bin).floor() as usize;
-    let max_bin = (max_bpm / 60.0 / freq_per_bin).ceil() as usize;
-    let max_bin = max_bin.min(num_bins - 1);  
+    let mut frequencies = Vec::with_capacity(num_bins);
+    let mut power = Vec::with_capacity(num_bins);
 
-    if min_bin >= max_bin {
+    for k in 0..num_bins {
+        frequencies.push(k as f32 * freq_per_bin);
+        power.push(buffer[k].norm_sqr());
+    }
+
+    PsdResult { frequencies, power }
+}
+
+/// Estimates heart rate by finding the dominant peak in the periodogram.
+pub fn estimate_rate_periodogram(
+    signal: &[f32],
+    fs: f32,
+    min_bpm: f32,
+    max_bpm: f32,
+    target_res_hz: f32,
+) -> (f32, f32) {
+    let psd = compute_periodogram(signal, fs, target_res_hz);
+    if psd.frequencies.is_empty() {
         return (0.0, 0.0);
     }
 
-    // Find bin with max energy
+    let freq_per_bin = psd.frequencies[1] - psd.frequencies[0];
+    let min_bin = (min_bpm / 60.0 / freq_per_bin).floor() as usize;
+    let max_bin = (max_bpm / 60.0 / freq_per_bin).ceil() as usize;
+    let max_bin = max_bin.min(psd.frequencies.len() - 1);
+
+    if min_bin >= max_bin { return (0.0, 0.0); }
+
+    // Find peak
     let mut max_energy = -1.0;
     let mut peak_idx = 0;
     let mut total_band_energy = 0.0;
 
     for k in min_bin..=max_bin {
-        let energy = buffer[k].norm_sqr();
+        let energy = psd.power[k];
         total_band_energy += energy;
-        
         if energy > max_energy {
             max_energy = energy;
             peak_idx = k;
         }
     }
 
-    if max_energy <= 0.0 || peak_idx == 0 || peak_idx >= num_bins - 1 {
+    if max_energy <= 0.0 || peak_idx == 0 || peak_idx >= psd.frequencies.len() - 1 {
         return (0.0, 0.0);
     }
 
-    // --- 5. Refinement (Parabolic Interpolation) ---
-    // Use Magnitude (sqrt of Energy) for cleaner interpolation shape
+    // Refinement (Parabolic Interpolation on Magnitudes)
     let y_c = max_energy.sqrt();
-    let y_l = buffer[peak_idx - 1].norm();
-    let y_r = buffer[peak_idx + 1].norm();
+    let y_l = psd.power[peak_idx - 1].sqrt();
+    let y_r = psd.power[peak_idx + 1].sqrt();
 
     let denom = 2.0 * (y_l - 2.0 * y_c + y_r);
-    let delta = if denom.abs() > 1e-9 {
-        (y_l - y_r) / denom
-    } else {
-        0.0
-    };
-    
-    // Clamp delta to valid range [-0.5, 0.5]
+    let delta = if denom.abs() > 1e-9 { (y_l - y_r) / denom } else { 0.0 };
     let delta = delta.max(-0.5).min(0.5);
     
-    let refined_bin = peak_idx as f32 + delta;
-    let bpm = refined_bin * freq_per_bin * 60.0;
+    let bpm = (peak_idx as f32 + delta) * freq_per_bin * 60.0;
 
-    // --- 6. Calculate Confidence (SNR) ---
-    // We sum energy in a fixed bandwidth around the peak (e.g. +/- 5 BPM)
-    // This makes the confidence metric robust to zero-padding/resolution changes.
+    // Confidence Calculation
     let search_radius_bpm = 5.0; 
     let search_radius_bins = (search_radius_bpm / 60.0 / freq_per_bin).ceil() as usize;
-    
     let lobe_start = peak_idx.saturating_sub(search_radius_bins).max(min_bin);
     let lobe_end = (peak_idx + search_radius_bins).min(max_bin);
     
-    let mut lobe_energy = 0.0;
-    for k in lobe_start..=lobe_end {
-        lobe_energy += buffer[k].norm_sqr();
-    }
-                    
-    let confidence = if total_band_energy > 0.0 {
-        (lobe_energy / total_band_energy).min(1.0)
-    } else {
-        0.0
-    };
+    let lobe_energy: f32 = psd.power[lobe_start..=lobe_end].iter().sum();
+    let confidence = if total_band_energy > 0.0 { (lobe_energy / total_band_energy).min(1.0) } else { 0.0 };
 
     (bpm, confidence)
 }
@@ -318,5 +308,80 @@ mod tests {
         });
         
         assert!(result.is_ok(), "Function panicked on NaN input");
+    }
+
+    // --- 4. compute_periodogram Tests ---
+
+    #[test]
+    fn test_psd_frequency_resolution() {
+        let fs = 30.0;
+        let target_res = 0.1; // 0.1 Hz per bin
+        let signal = vec![0.0; 100];
+        
+        let psd = compute_periodogram(&signal, fs, target_res);
+        
+        // Freq per bin = fs / fft_len
+        // next_power_of_two of (30 / 0.1 = 300) is 512.
+        // Freq per bin = 30 / 512 = 0.0585... which is < 0.1.
+        let actual_res = psd.frequencies[1] - psd.frequencies[0];
+        assert!(actual_res <= target_res);
+        assert_eq!(psd.frequencies.len(), psd.power.len());
+    }
+
+    #[test]
+    fn test_psd_peak_location() {
+        let fs = 20.0;
+        let target_hz = 2.0; // 2Hz sine wave
+        let signal = SignalBuilder::new(5.0, fs)
+            .add_sine(target_hz, 1.0)
+            .get();
+        
+        let psd = compute_periodogram(&signal, fs, 0.01);
+        
+        // Find index of max power
+        let (max_idx, _) = psd.power.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+            
+        let peak_freq = psd.frequencies[max_idx];
+        
+        // Should be very close to 2.0Hz
+        assert!((peak_freq - target_hz).abs() < 0.05);
+    }
+
+    #[test]
+    fn test_psd_energy_scaling() {
+        let fs = 10.0;
+        let sig1 = SignalBuilder::new(5.0, fs).add_sine(1.0, 1.0).get();
+        let sig2 = SignalBuilder::new(5.0, fs).add_sine(1.0, 2.0).get(); // Double amp
+        
+        let psd1 = compute_periodogram(&sig1, fs, 0.1);
+        let psd2 = compute_periodogram(&sig2, fs, 0.1);
+        
+        let max_p1 = *psd1.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        let max_p2 = *psd2.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        
+        // Power scales with square of amplitude. 2^2 = 4.
+        let ratio = max_p2 / max_p1;
+        assert!((ratio - 4.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_psd_dc_removal() {
+        let fs = 10.0;
+        let signal = SignalBuilder::new(5.0, fs)
+            .add_sine(1.0, 1.0)
+            .add_offset(100.0) // Large DC offset
+            .get();
+            
+        let psd = compute_periodogram(&signal, fs, 0.1);
+        
+        // psd.frequencies[0] is the DC bin (0Hz)
+        // It should be significantly smaller than the 1Hz signal bin
+        let dc_power = psd.power[0];
+        let sig_power = *psd.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
+        
+        assert!(dc_power < sig_power * 0.01); 
     }
 }

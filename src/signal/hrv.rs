@@ -119,6 +119,37 @@ pub fn calculate_rmssd(nn_intervals: &[f32]) -> f32 {
     (sum_sq_diff / (nn_intervals.len() - 1) as f32).sqrt()
 }
 
+/// Calculates the LF/HF ratio (Autonomic Balance).
+/// Uses a high-resolution Periodogram on 4Hz resampled data.
+pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
+    const FS_R: f32 = 4.0;
+    let resampled = resample_nn_intervals(nn_intervals, FS_R);
+    
+    // Compute PSD using the refactored engine in fft.rs
+    // High resolution (0.001 Hz) ensures clean band separation
+    let psd = crate::signal::fft::compute_periodogram(&resampled, FS_R, 0.001);
+    
+    let mut lf_power = 0.0;
+    let mut hf_power = 0.0;
+
+    for (i, &f) in psd.frequencies.iter().enumerate() {
+        // LF: 0.04 - 0.15 Hz
+        if f >= 0.04 && f < 0.15 {
+            lf_power += psd.power[i];
+        } 
+        // HF: 0.15 - 0.40 Hz
+        else if f >= 0.15 && f <= 0.40 {
+            hf_power += psd.power[i];
+        }
+    }
+
+    if hf_power > 0.0 {
+        lf_power / hf_power
+    } else {
+        0.0
+    }
+}
+
 // --- Helpers ---
 
 fn resolve_time(p: &Peak, timestamps: &[f64], fs_fallback: f32) -> f64 {
@@ -160,6 +191,48 @@ fn filter_outliers(intervals: &[f32], threshold: f32) -> Vec<f32> {
         .filter(|&&x| x >= lower_bound && x <= upper_bound)
         .cloned()
         .collect()
+}
+
+/// Resamples unevenly spaced NN intervals to a constant 4Hz time-series.
+fn resample_nn_intervals(nn_intervals: &[f32], target_fs: f32) -> Vec<f32> {
+    if nn_intervals.is_empty() { return Vec::new(); }
+
+    // 1. Create cumulative time axis (in seconds)
+    // We place each interval at its ending time.
+    let mut t = Vec::with_capacity(nn_intervals.len());
+    let mut current_t = 0.0;
+    for &interval_ms in nn_intervals {
+        current_t += interval_ms / 1000.0;
+        t.push(current_t);
+    }
+
+    let t_max = t[t.len() - 1];
+    let step = 1.0 / target_fs;
+    let num_samples = (t_max / step).floor() as usize;
+    let mut resampled = Vec::with_capacity(num_samples);
+    
+    let mut cursor = 0;
+    for i in 0..num_samples {
+        let t_u = i as f32 * step;
+        
+        // Find interval in t that surrounds t_u
+        while cursor < t.len() - 1 && t[cursor + 1] < t_u {
+            cursor += 1;
+        }
+        
+        if cursor >= t.len() - 1 { break; }
+        
+        // Linear Interpolation: y = y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+        let x0 = t[cursor];
+        let x1 = t[cursor + 1];
+        let y0 = nn_intervals[cursor];
+        let y1 = nn_intervals[cursor + 1];
+        
+        let val = y0 + (y1 - y0) * (t_u - x0) / (x1 - x0);
+        resampled.push(val);
+    }
+    
+    resampled
 }
 
 #[cfg(test)]
@@ -370,5 +443,61 @@ mod tests {
 
         assert_eq!(intervals.len(), 2); // P1-P2, P2-P3. (P3-P4 dropped).
         assert!((min_conf - 0.6).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_calculate_sdnn() {
+        // Data: [800, 900, 1000]
+        // Mean: 900
+        // Variance: ((800-900)^2 + (900-900)^2 + (1000-900)^2) / (3-1)
+        // Variance: (10000 + 0 + 10000) / 2 = 10000
+        // SD: sqrt(10000) = 100
+        let intervals = vec![800.0, 900.0, 1000.0];
+        let sdnn = calculate_sdnn(&intervals);
+        assert!((sdnn - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_calculate_rmssd() {
+        // Intervals: [800, 900, 850]
+        // Diffs: [100, -50]
+        // Sq Diffs: [10000, 2500]
+        // Mean Sq: (10000 + 2500) / 2 = 6250
+        // RMSSD: sqrt(6250) = 79.0569
+        let intervals = vec![800.0, 900.0, 850.0];
+        let rmssd = calculate_rmssd(&intervals);
+        assert!((rmssd - 79.0569).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_resample_logic_accuracy() {
+        // Constant HR of 60 BPM = 1000ms intervals
+        let intervals = vec![1000.0; 10]; 
+        let resampled = resample_nn_intervals(&intervals, 4.0);
+        
+        // All resampled points should be exactly 1000ms
+        for &val in &resampled {
+            assert!((val - 1000.0).abs() < 0.1);
+        }
+        // Total time 10s @ 4Hz = ~40 samples
+        assert!(resampled.len() >= 39 && resampled.len() <= 41);
+    }
+
+    #[test]
+    fn test_lfhf_high_vagal_tone_simulation() {
+        // Simulate Deep Breathing (0.25 Hz / 4s period)
+        // This should put massive power in the HF band (0.15-0.4Hz)
+        let mut intervals = Vec::new();
+        for i in 0..100 {
+            let t = i as f32;
+            // HR oscillates between 800ms and 1200ms every 4 seconds
+            let val = 1000.0 + 200.0 * (2.0 * std::f32::consts::PI * 0.25 * t).sin();
+            intervals.push(val);
+        }
+
+        let ratio = calculate_lfhf(&intervals);
+        
+        // High HF power means LF/HF ratio should be very low (< 1.0)
+        assert!(ratio < 0.5, "Expected low ratio for high-frequency oscillation, got {}", ratio);
     }
 }
