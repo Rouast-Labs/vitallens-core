@@ -43,7 +43,7 @@ pub struct InputChunk {
 pub enum WaveformMode {
     Incremental,
     Windowed { seconds: f32 },
-    Complete,  
+    Global,
 }
 
 #[cfg(feature = "python")]
@@ -52,7 +52,7 @@ impl<'source> FromPyObject<'source> for WaveformMode {
         if let Ok(s) = ob.extract::<String>() {
             match s.as_str() {
                 "Incremental" => Ok(WaveformMode::Incremental),
-                "Complete" => Ok(WaveformMode::Complete),
+                "Global" => Ok(WaveformMode::Global),
                 _ => Err(pyo3::exceptions::PyValueError::new_err("Invalid WaveformMode string")),
             }
         } 

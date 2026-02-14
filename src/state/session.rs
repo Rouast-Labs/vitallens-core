@@ -182,7 +182,7 @@ impl SessionCore {
                         let min_frames = (cfg.min_required_seconds * fs) as usize;
                         if available_frames >= min_frames {
                             let take_frames = match mode {
-                                WaveformMode::Complete => available_frames,
+                                WaveformMode::Global => available_frames,
                                 _ => {
                                     if let WaveformMode::Windowed { seconds } = mode {
                                         let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
@@ -219,7 +219,7 @@ impl SessionCore {
     fn construct_output(&mut self, mode: WaveformMode, scalar_results: HashMap<String, (f32, f32)>) -> SessionResult {
          
         let start_index = match mode {
-            WaveformMode::Complete => 0,
+            WaveformMode::Global => 0,
             WaveformMode::Windowed { seconds } => {
                 let window_frames = (seconds * self.config.fps_target) as usize;
                 self.timestamps.len().saturating_sub(window_frames)
