@@ -4,7 +4,7 @@ use std::collections::HashMap;
 pub enum WaveformMode {
     Incremental,
     Windowed(f32),
-    Complete,
+    Complete, // TODO: rename to global
 }
 
 #[derive(Debug, Clone)]

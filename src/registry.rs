@@ -64,10 +64,21 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivation: None,
             processing: Some(ProcessingConfig {
                 operation: PostProcessOp::Detrend,
-                min_window_seconds: 1.0,
+                min_window_seconds: 5.0,
             }),
             unit: "unitless".to_string(),
             display_name: "PPG Waveform".to_string(),
+        }),
+        "respiratory_waveform" | "resp_waveform" | "resp" => Some(VitalMeta {
+            id: "respiratory_waveform".to_string(),
+            vital_type: VitalType::Provided,
+            derivation: None,
+            processing: Some(ProcessingConfig {
+                operation: PostProcessOp::Detrend,
+                min_window_seconds: 10.0,
+            }),
+            unit: "unitless".to_string(),
+            display_name: "RESP Waveform".to_string(),
         }),
         "heart_rate" | "hr" | "pulse" => Some(VitalMeta {
             id: "heart_rate".to_string(),
@@ -75,9 +86,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivation: Some(DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::Rate(RateStrategy::Periodogram { 
-                    target_res_hz: 0.005 
+                    target_res_hz: 0.005
                 }),
-                min_required_seconds: 4.0,
+                min_required_seconds: 5.0,
                 optimal_window_seconds: 10.0,
                 min_value: 40.0,
                 max_value: 240.0,
@@ -87,21 +98,71 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "bpm".to_string(),
             display_name: "Heart Rate".to_string(),
         }),
+        "respiratory_rate" | "rr" | "resp_rate" => Some(VitalMeta {
+            id: "respiratory_rate".to_string(),
+            vital_type: VitalType::Derived,
+            derivation: Some(DerivationConfig {
+                source_signal: "respiratory_waveform".to_string(),
+                method: CalculationMethod::Rate(RateStrategy::Periodogram { 
+                    target_res_hz: 0.01
+                }),
+                min_required_seconds: 10.0,
+                optimal_window_seconds: 30.0,
+                min_value: 4.0,
+                max_value: 60.0,
+                order: 0,
+            }),
+            processing: None,
+            unit: "bpm".to_string(),
+            display_name: "Respiratory Rate".to_string(),
+        }),
         "hrv_sdnn" | "sdnn" => Some(VitalMeta {
             id: "hrv_sdnn".to_string(),
             vital_type: VitalType::Derived,
             derivation: Some(DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Sdnn),
-                min_required_seconds: 10.0,
+                min_required_seconds: 20.0,
                 optimal_window_seconds: 60.0,
-                min_value: 0.0,
-                max_value: 500.0,
-                order: 1, 
+                min_value: 1.0,
+                max_value: 200.0,
+                order: 1,
             }),
             processing: None,
             unit: "ms".to_string(),
-            display_name: "HRV (SDNN)".to_string(),
+            display_name: "Heart Rate Variability (SDNN)".to_string(),
+        }),
+        "hrv_rmssd" | "rmssd" => Some(VitalMeta {
+            id: "hrv_rmssd".to_string(),
+            vital_type: VitalType::Derived,
+            derivation: Some(DerivationConfig {
+                source_signal: "ppg_waveform".to_string(),
+                method: CalculationMethod::HrvFromPeaks(HrvMetric::Rmssd),
+                min_required_seconds: 20.0,
+                optimal_window_seconds: 60.0,
+                min_value: 1.0,
+                max_value: 200.0,
+                order: 1,
+            }),
+            processing: None,
+            unit: "ms".to_string(),
+            display_name: "Heart Rate Variability (RMSSD)".to_string(),
+        }),
+        "hrv_lfhf" | "lfhf" => Some(VitalMeta {
+            id: "hrv_lfhf".to_string(),
+            vital_type: VitalType::Derived,
+            derivation: Some(DerivationConfig {
+                source_signal: "ppg_waveform".to_string(),
+                method: CalculationMethod::HrvFromPeaks(HrvMetric::LfHf),
+                min_required_seconds: 55.0,
+                optimal_window_seconds: 120.0,
+                min_value: 0.0,
+                max_value: 10.0,
+                order: 1,
+            }),
+            processing: None,
+            unit: "ratio".to_string(),
+            display_name: "Heart Rate Variability (LF/HF)".to_string(),
         }),
         "spo2" => Some(VitalMeta {
             id: "spo2".to_string(),

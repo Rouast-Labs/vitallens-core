@@ -17,6 +17,41 @@ impl Default for HrvOptions {
     }
 }
 
+/// High-level coordinator for HRV metrics.
+/// Detects peaks, extracts gated intervals, and computes the requested metric.
+pub fn estimate_hrv(
+    signal: &[f32], 
+    fs: f32, 
+    metric: crate::registry::HrvMetric, 
+    timestamps: &[f64],
+    confidence: &[f32],
+) -> (f32, f32) {
+    let options = crate::signal::peaks::PeakOptions {
+        fs,
+        ..Default::default()
+    };
+    let sequences = crate::signal::peaks::find_peaks(signal, options);
+
+    let hrv_opts = HrvOptions {
+        fs_fallback: fs,
+        ..Default::default()
+    };
+    
+    let (intervals, min_conf) = extract_nn_intervals(&sequences, timestamps, confidence, hrv_opts);
+
+    if intervals.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let value = match metric {
+        crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
+        crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
+        crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
+    };
+
+    (value, min_conf)
+}
+
 /// Extracts valid Normal-to-Normal (NN) intervals from multiple sequences of peaks.
 /// 
 /// This function prevents "phantom intervals" by only calculating differences within
@@ -269,10 +304,8 @@ mod tests {
 
         let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
         
-        // Should calculate interval between Peak 0 and Peak 2 directly
-        // TODO: Shouldn't there be no valid intervals here?
+        // There should be no valid intervals
         assert_eq!(intervals.len(), 0);
-        // assert!((intervals[0] - 2000.0).abs() < 0.1);
     }
 
     #[test]

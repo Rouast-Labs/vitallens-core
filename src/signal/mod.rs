@@ -5,10 +5,11 @@ pub mod rate;
 pub mod stubs;
 pub mod hrv;
 
-// Remove the old dummy process_batch function if it conflicts, 
-// or keep it for backward compat until we fully replace it.
-// For now, let's leave it but maybe deprecate it.
-pub fn process_batch(signal: &[f32], _fs: f32) -> f32 {
-    if signal.is_empty() { return 0.0; }
-    signal.iter().sum::<f32>() / signal.len() as f32
+pub use hrv::estimate_hrv;
+pub use rate::estimate_rate;
+
+pub fn calculate_average(signal: &[f32]) -> (f32, f32) {
+    if signal.is_empty() { return (0.0, 0.0); }
+    let sum: f32 = signal.iter().sum();
+    (sum / signal.len() as f32, 1.0)
 }

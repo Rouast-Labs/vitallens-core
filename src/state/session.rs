@@ -127,46 +127,45 @@ impl Session {
         for vital_id in &self.active_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
                 if let Some(cfg) = &meta.derivation {
-                    
                     if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
                         let full_data = source_buf.compute_average();
-                        
-                        let window_seconds = match mode {
-                            WaveformMode::Complete => full_data.len() as f32 / fs,
-                            _ => cfg.optimal_window_seconds,
-                        };
-
                         let available_frames = full_data.len();
                         let min_frames = (cfg.min_required_seconds * fs) as usize;
-
                         if available_frames >= min_frames {
-                            let take_frames = ((window_seconds * fs) as usize).min(available_frames);
+                            let take_frames = match mode {
+                                WaveformMode::Complete => available_frames,
+                                _ => {
+                                    let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
+                                    optimal_frames.min(available_frames)
+                                }
+                            };
                             let start_idx = available_frames - take_frames;
                             let slice = &full_data[start_idx..];
 
                             let (val, conf) = match &cfg.method {
                                 CalculationMethod::Rate(strategy) => {
-                                    // 1. Construct bounds from registry config
                                     let bounds = crate::signal::rate::RateBounds {
                                         min: cfg.min_value,
                                         max: cfg.max_value,
                                     };
-
-                                    // 2. Call generic estimator
                                     let res = crate::signal::rate::estimate_rate(
                                         slice, fs, bounds, *strategy, None
                                     );
-                                    
                                     (res.value, res.confidence)
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
-                                    let current_hr = results.get("heart_rate").map(|(v, _)| *v);
-                                    crate::signal::stubs::estimate_hrv(
-                                        slice, fs, *metric, current_hr
+                                    let ts_slice = &self.timestamps[start_idx..];
+                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
+                                        .map(|b| b.compute_average())
+                                        .unwrap_or_else(|| vec![1.0; available_frames]);
+                                    let conf_slice = &conf_data[start_idx..];
+
+                                    crate::signal::hrv::estimate_hrv(
+                                        slice, fs, *metric, ts_slice, conf_slice
                                     )
                                 },
                                 CalculationMethod::Average => {
-                                    crate::signal::stubs::calculate_average(slice)
+                                    crate::signal::calculate_average(slice)
                                 }
                             };
 
@@ -182,22 +181,16 @@ impl Session {
     }
 
     fn construct_output(&mut self, mode: WaveformMode, scalar_results: HashMap<String, (f32, f32)>) -> SessionResult {
-        // Determine start index based on mode
+        // 1. Determine start index based on mode
         let start_index = match mode {
             WaveformMode::Complete => 0,
             WaveformMode::Windowed(seconds) => {
                 let window_frames = (seconds * self.config.fps_target) as usize;
-                if self.timestamps.len() > window_frames {
-                    self.timestamps.len() - window_frames
-                } else {
-                    0
-                }
+                self.timestamps.len().saturating_sub(window_frames)
             },
             WaveformMode::Incremental => {
-                match self.timestamps.iter().position(|&t| t > self.last_emitted_timestamp) {
-                    Some(idx) => idx,
-                    None => self.timestamps.len() 
-                }
+                self.timestamps.iter().position(|&t| t > self.last_emitted_timestamp)
+                    .unwrap_or(self.timestamps.len())
             }
         };
 
@@ -205,7 +198,7 @@ impl Session {
             self.last_emitted_timestamp = last;
         }
 
-        // 2. Slice data
+        // 2. Define Slicing Helpers
         let slice_vec_f32 = |v: &[f32]| -> Vec<f32> {
             if start_index < v.len() { v[start_index..].to_vec() } else { Vec::new() }
         };
@@ -217,48 +210,60 @@ impl Session {
         let slice_vec_coords = |v: &[[f32; 4]]| -> Vec<[f32; 4]> {
             if start_index < v.len() { v[start_index..].to_vec() } else { Vec::new() }
         };
-      
+
+        let timestamp_slice = slice_vec_f64(&self.timestamps);
+        let effective_fps = if timestamp_slice.len() > 1 {
+            let duration = timestamp_slice.last().unwrap() - timestamp_slice.first().unwrap();
+            if duration > 0.0 {
+                (timestamp_slice.len() - 1) as f32 / duration as f32
+            } else {
+                self.config.fps_target
+            }
+        } else {
+            self.config.fps_target
+        };
+
         let mut signals_out = HashMap::new();
+        let fs = self.config.fps_target; // Defined local fs for use in processing
 
         for vital_id in &self.active_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
                 
-                // 1. Handle waveform data
                 let mut waveform_data = Vec::new();
                 let mut waveform_conf = Vec::new();
                 
                 if let VitalType::Provided = meta.vital_type {
                     if let Some(buf) = self.signal_data.get(vital_id) {
                         let full_data = buf.compute_average();
-                        // Post-Processing?
+                        
+                        // Apply processing (Detrend/Standardize) for UI/Output only
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
-                             if full_data.len() >= (proc_cfg.min_window_seconds * self.config.fps_target) as usize {
-                                 crate::signal::stubs::apply_processing(&full_data, proc_cfg.operation)
-                             } else {
-                                 full_data
-                             }
+                            if full_data.len() >= (proc_cfg.min_window_seconds * fs) as usize {
+                                crate::signal::filters::apply_processing(&full_data, proc_cfg.operation, fs)
+                            } else {
+                                full_data
+                            }
                         } else {
                             full_data
                         };
                         
-                        waveform_data = slice_vec_f32(&processed_data); // Slice for output
+                        waveform_data = slice_vec_f32(&processed_data);
                         
-                        // Handle Confidence
+                        // Slicing confidence to match the waveform slice
                         if let Some(c_buf) = self.signal_confs.get(vital_id) {
-                             waveform_conf = slice_vec_f32(&c_buf.compute_average());
+                            let full_conf = c_buf.compute_average();
+                            waveform_conf = slice_vec_f32(&full_conf);
                         } else {
-                             waveform_conf = vec![1.0; waveform_data.len()];
+                            waveform_conf = vec![1.0; waveform_data.len()];
                         }
                     }
                 }
 
-                // 2. Handle scalar value
                 let (val, conf_scalar) = match scalar_results.get(vital_id) {
                     Some(&(v, c)) => (Some(v), vec![c]),
                     None => (None, Vec::new()),
                 };
                 
-                // Only insert if we have *something* (waveform OR value)
                 if !waveform_data.is_empty() || val.is_some() {
                     signals_out.insert(vital_id.clone(), SignalResult {
                         value: val,
@@ -285,7 +290,7 @@ impl Session {
             timestamp: slice_vec_f64(&self.timestamps),
             face: face_result,
             signals: signals_out,
-            fps: self.config.fps_target, // TODO: Compute actual fps
+            fps: effective_fps,
             message: "OK".to_string(),
             model_used: self.config.name.clone(),
         }

@@ -9,9 +9,9 @@ pub fn register_functions(m: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-#[pyfunction]
-#[pyo3(name = "process_batch")]
-fn process_signal_py(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<f32> {
-    let signal_slice = signal.as_slice()?;
-    Ok(signal::process_batch(signal_slice, fs))
-}
+// #[pyfunction]
+// #[pyo3(name = "process_batch")]
+// fn process_signal_py(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<f32> {
+//     let signal_slice = signal.as_slice()?;
+//     Ok(signal::process_batch(signal_slice, fs))
+// }

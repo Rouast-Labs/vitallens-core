@@ -1,5 +1,17 @@
 use std::f32;
 
+pub fn apply_processing(
+    signal: &[f32], 
+    op: crate::registry::PostProcessOp,
+    fs: f32,
+) -> Vec<f32> {
+    match op {
+        crate::registry::PostProcessOp::Detrend => detrend(signal, fs),
+        crate::registry::PostProcessOp::Standardize => standardize(signal),
+        crate::registry::PostProcessOp::None => signal.to_vec(),
+    }
+}
+
 /// Calculates the centered moving average of a signal.
 ///
 /// # Arguments
