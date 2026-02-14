@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
 use crate::state::buffers::SignalBuffer;
-use crate::registry::{self, VitalType, CalculationMethod};
+use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
@@ -11,7 +11,7 @@ use pyo3::prelude::*;
 use wasm_bindgen::prelude::*;
 
 // ========================================================================
-// 1. THE LOGIC CORE (Private, no FFI attributes, uses &mut self freely)
+// THE LOGIC CORE (Private, no FFI attributes, uses &mut self freely)
 // ========================================================================
 
 #[derive(Debug)]
@@ -26,6 +26,7 @@ struct SessionCore {
     last_emitted_timestamp: f64,
     max_history: usize,
     active_vitals: Vec<String>,
+    vital_metas: HashMap<String, VitalMeta>,
 }
 
 impl SessionCore {
@@ -33,8 +34,11 @@ impl SessionCore {
         let max_history = (config.fps_target * 60.0) as usize;
         
         let mut resolved_metas = Vec::new();
+        let mut meta_map = HashMap::new();
+
         for vital_id in &config.supported_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
+                meta_map.insert(meta.id.clone(), meta.clone());
                 resolved_metas.push(meta);
             }
         }
@@ -55,6 +59,7 @@ impl SessionCore {
             last_emitted_timestamp: -1.0,
             max_history,
             active_vitals,
+            vital_metas: meta_map,
         }
     }
 
@@ -174,7 +179,7 @@ impl SessionCore {
         let fs = self.config.fps_target;  
 
         for vital_id in &self.active_vitals {
-            if let Some(meta) = registry::get_vital_meta(vital_id) {
+            if let Some(meta) = self.vital_metas.get(vital_id) { 
                 for cfg in &meta.derivations {
                     if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
                         let full_data = source_buf.compute_average();
@@ -184,7 +189,7 @@ impl SessionCore {
                             let take_frames = match mode {
                                 WaveformMode::Global => available_frames,
                                 _ => {
-                                    if let WaveformMode::Windowed { seconds } = mode {
+                                    if let WaveformMode::Windowed { .. } = mode {
                                         let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
                                         preferred_frames.min(available_frames)
                                     } else {
@@ -266,7 +271,7 @@ impl SessionCore {
         let fs = self.config.fps_target;  
 
         for vital_id in &self.active_vitals {
-            if let Some(meta) = registry::get_vital_meta(vital_id) {
+            if let Some(meta) = self.vital_metas.get(vital_id) {
                 
                 let mut waveform_data = Vec::new();
                 let mut waveform_conf = Vec::new();
@@ -306,7 +311,7 @@ impl SessionCore {
                         value: val,
                         data: waveform_data,
                         confidence: if !waveform_conf.is_empty() { waveform_conf } else { conf_scalar },
-                        unit: meta.unit,
+                        unit: meta.unit.clone(),
                         note: None,
                     });
                 }
@@ -335,7 +340,7 @@ impl SessionCore {
 }
 
 // ========================================================================
-// 2. THE PUBLIC SHELL (Exported, FFI-safe types only, Interior Mutability)
+// THE PUBLIC SHELL (Exported, FFI-safe types only, Interior Mutability)
 // ========================================================================
 
 #[derive(Debug)]
