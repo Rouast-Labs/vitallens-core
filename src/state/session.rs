@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
 use crate::state::buffers::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
+use crate::signal::fft::FftScratch;
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
@@ -27,6 +28,7 @@ struct SessionCore {
     max_history: usize,
     active_vitals: Vec<String>,
     vital_metas: HashMap<String, VitalMeta>,
+    fft_scratch: FftScratch,
 }
 
 impl SessionCore {
@@ -60,6 +62,7 @@ impl SessionCore {
             max_history,
             active_vitals,
             vital_metas: meta_map,
+            fft_scratch: FftScratch::new(),
         }
     }
 
@@ -146,42 +149,16 @@ impl SessionCore {
         }
     }
 
-    fn run_derivation_method(
-        &self, 
-        cfg: &crate::registry::DerivationConfig,
-        slice: &[f32],
-        fs: f32,
-        start_idx: usize,
-        available_frames: usize,
-    ) -> (f32, f32) {
-        match &cfg.method {
-            CalculationMethod::Rate(strategy) => {
-                let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
-                let res = crate::signal::rate::estimate_rate(slice, fs, bounds, *strategy, None);
-                (res.value, res.confidence)
-            },
-            CalculationMethod::HrvFromPeaks(metric) => {
-                let ts_slice = &self.timestamps[start_idx..];
-                let conf_data = self.signal_confs.get(&cfg.source_signal)
-                    .map(|b| b.compute_average())
-                    .unwrap_or_else(|| vec![1.0; available_frames]);
-                let conf_slice = &conf_data[start_idx..];
-                crate::signal::hrv::estimate_hrv(slice, fs, *metric, ts_slice, conf_slice)
-            },
-            CalculationMethod::Average => crate::signal::calculate_average(slice),
-            CalculationMethod::BpSystolic => crate::signal::bp::extract_systolic_pressure(slice, fs),
-            CalculationMethod::BpDiastolic => crate::signal::bp::extract_diastolic_pressure(slice, fs),
-        }
-    }
-
-    fn perform_derivations(&self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
+    fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
         let fs = self.config.fps_target;  
 
-        for vital_id in &self.active_vitals {
-            if let Some(meta) = self.vital_metas.get(vital_id) { 
+        let vital_ids: Vec<String> = self.active_vitals.clone();
+
+        for vital_id in vital_ids {
+            if let Some(meta) = self.vital_metas.get(&vital_id).cloned() { 
                 for cfg in &meta.derivations {
-                    if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
+                    if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {                        
                         let full_data = source_buf.compute_average();
                         let available_frames = full_data.len();
                         let min_frames = (cfg.min_window_seconds * fs) as usize;
@@ -201,13 +178,26 @@ impl SessionCore {
                             let start_idx = available_frames - take_frames;
                             let slice = &full_data[start_idx..];
 
-                            let (val, conf) = self.run_derivation_method(
-                                cfg,
-                                slice,
-                                fs,
-                                start_idx,
-                                available_frames
-                            );
+                            let (val, conf) = match &cfg.method {
+                                CalculationMethod::Rate(strategy) => {
+                                    let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };                                    
+                                    let res = crate::signal::rate::estimate_rate(
+                                        slice, fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
+                                    );
+                                    (res.value, res.confidence)
+                                },
+                                CalculationMethod::HrvFromPeaks(metric) => {
+                                    let ts_slice = &self.timestamps[start_idx..];
+                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
+                                        .map(|b| b.compute_average())
+                                        .unwrap_or_else(|| vec![1.0; available_frames]);
+                                    let conf_slice = &conf_data[start_idx..];
+                                    crate::signal::hrv::estimate_hrv(slice, fs, *metric, ts_slice, conf_slice)
+                                },
+                                CalculationMethod::Average => crate::signal::calculate_average(slice),
+                                CalculationMethod::BpSystolic => crate::signal::bp::extract_systolic_pressure(slice, fs),
+                                CalculationMethod::BpDiastolic => crate::signal::bp::extract_diastolic_pressure(slice, fs),
+                            };
 
                             if val >= cfg.min_value && val <= cfg.max_value {
                                 results.insert(vital_id.clone(), (val, conf));

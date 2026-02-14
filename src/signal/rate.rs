@@ -31,11 +31,12 @@ pub fn estimate_rate(
     bounds: RateBounds,
     strategy: RateStrategy,
     rate_hint: Option<f32>,
+    scratch: Option<&mut fft::FftScratch>,
 ) -> RateResult {
     match strategy {
         RateStrategy::Periodogram { target_res_hz } => {
             let (val, conf) = fft::estimate_rate_periodogram(
-                signal, fs, bounds.min, bounds.max, target_res_hz
+                signal, fs, bounds.min, bounds.max, target_res_hz, scratch
             );
             
             RateResult {

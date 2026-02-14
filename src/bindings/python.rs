@@ -13,15 +13,14 @@ pub fn register_functions(m: &PyModule) -> PyResult<()> {
 }
 
 /// Tier 2: Stateless Heart Rate Estimation
-/// Usage: val, conf = vitallens_core.estimate_heart_rate(signal_array, 30.0)
 #[pyfunction]
 fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
-    // Use default strict bounds for "one-shot" analysis
     let bounds = RateBounds { min: 40.0, max: 200.0 }; 
     let strategy = RateStrategy::Periodogram { target_res_hz: 0.01 };
     
-    let res = signal::estimate_rate(s, fs, bounds, strategy, None);
+    let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
+    
     Ok((res.value, res.confidence))
 }
 
@@ -29,8 +28,6 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
 #[pyfunction]
 fn estimate_hrv_sdnn(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
-    // For stateless calls, we assume 100% signal confidence and synthetic timestamps
-    // or you can expose a version that takes timestamps if needed.
     let (val, conf) = signal::estimate_hrv(s, fs, HrvMetric::Sdnn, &[], &[]);
     Ok((val, conf))
 }

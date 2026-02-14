@@ -160,21 +160,21 @@ pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
     const FS_R: f32 = 4.0;
     let resampled = resample_nn_intervals(nn_intervals, FS_R);
     
-    // Compute PSD using the refactored engine in fft.rs
-    // High resolution (0.001 Hz) ensures clean band separation
-    let psd = crate::signal::fft::compute_periodogram(&resampled, FS_R, 0.001);
+    let mut scratch = crate::signal::fft::FftScratch::new();
+    
+    crate::signal::fft::compute_periodogram(&resampled, FS_R, 0.001, &mut scratch);
     
     let mut lf_power = 0.0;
     let mut hf_power = 0.0;
 
-    for (i, &f) in psd.frequencies.iter().enumerate() {
-        // LF: 0.04 - 0.15 Hz
+    for (i, &f) in scratch.frequencies.iter().enumerate() {
+        
         if f >= 0.04 && f < 0.15 {
-            lf_power += psd.power[i];
+            lf_power += scratch.power[i];
         } 
-        // HF: 0.15 - 0.40 Hz
+        
         else if f >= 0.15 && f <= 0.40 {
-            hf_power += psd.power[i];
+            hf_power += scratch.power[i];
         }
     }
 
