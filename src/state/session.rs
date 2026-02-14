@@ -1,9 +1,21 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
 use crate::state::buffers::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod};
 
-pub struct Session {
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+// ========================================================================
+// 1. THE LOGIC CORE (Private, no FFI attributes, uses &mut self freely)
+// ========================================================================
+
+#[derive(Debug)]
+struct SessionCore {
     config: ModelConfig,
     timestamps: Vec<f64>,
     signal_data: HashMap<String, SignalBuffer>,
@@ -16,21 +28,22 @@ pub struct Session {
     active_vitals: Vec<String>,
 }
 
-impl Session {
-    pub fn new(config: ModelConfig) -> Self {
+impl SessionCore {
+    fn new(config: ModelConfig) -> Self {
         let max_history = (config.fps_target * 60.0) as usize;
-        // Resolve aliases and identify supported vitals
+        
         let mut resolved_metas = Vec::new();
         for vital_id in &config.supported_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
                 resolved_metas.push(meta);
             }
         }
-        // Sort by order
+        
         resolved_metas.sort_by_key(|m| {
             m.derivations.first().map(|d| d.order).unwrap_or(0)
         });
         let active_vitals = resolved_metas.into_iter().map(|m| m.id).collect();
+        
         Self {
             config,
             timestamps: Vec::new(),
@@ -45,7 +58,7 @@ impl Session {
         }
     }
 
-    pub fn process_chunk(&mut self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+    fn process_chunk(&mut self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
         let overlap = self.merge_timestamps(&chunk.timestamp);
         self.merge_signals(chunk.signals, chunk.confidences, overlap);
         self.merge_face(chunk.face, overlap, chunk.timestamp.len());
@@ -55,6 +68,8 @@ impl Session {
 
         self.construct_output(mode, derived_results)
     }
+
+    // --- Private Helpers (Moved here to avoid FFI type checks) ---
 
     fn merge_timestamps(&mut self, new_times: &[f64]) -> usize {
         if new_times.is_empty() { return 0; }
@@ -73,7 +88,7 @@ impl Session {
                 self.timestamps.extend_from_slice(&new_times[idx..]);
                 overlap
             }
-            None => new_times.len() // Fully overlapping
+            None => new_times.len()  
         }
     }
 
@@ -90,9 +105,15 @@ impl Session {
     }
 
     fn merge_face(&mut self, face: Option<FaceInput>, overlap: usize, chunk_len: usize) {
-        let (coords, conf) = match face {
+        let (coords_vec, conf) = match face {
             Some(f) => (f.coordinates, f.confidence),
-            None => ([0.0; 4], 0.0)
+            None => (vec![0.0; 4], 0.0)
+        };
+        
+        let coords: [f32; 4] = if coords_vec.len() == 4 {
+            [coords_vec[0], coords_vec[1], coords_vec[2], coords_vec[3]]
+        } else {
+            [0.0; 4]
         };
 
         let new_frames_count = if chunk_len > overlap { chunk_len - overlap } else { 0 };
@@ -121,7 +142,7 @@ impl Session {
     }
 
     fn run_derivation_method(
-        &self,
+        &self, 
         cfg: &crate::registry::DerivationConfig,
         slice: &[f32],
         fs: f32,
@@ -150,7 +171,7 @@ impl Session {
 
     fn perform_derivations(&self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-        let fs = self.config.fps_target; // TODO: Use derived fs instead. This may be wrong
+        let fs = self.config.fps_target;  
 
         for vital_id in &self.active_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
@@ -163,14 +184,18 @@ impl Session {
                             let take_frames = match mode {
                                 WaveformMode::Complete => available_frames,
                                 _ => {
-                                    let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
-                                    optimal_frames.min(available_frames)
+                                    if let WaveformMode::Windowed { seconds } = mode {
+                                        let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
+                                        optimal_frames.min(available_frames)
+                                    } else {
+                                        let optimal_frames = (cfg.optimal_window_seconds * fs) as usize;
+                                        optimal_frames.min(available_frames)
+                                    }
                                 }
                             };
                             let start_idx = available_frames - take_frames;
                             let slice = &full_data[start_idx..];
 
-                            // Run the specialized math
                             let (val, conf) = self.run_derivation_method(
                                 cfg,
                                 slice,
@@ -192,10 +217,10 @@ impl Session {
     }
 
     fn construct_output(&mut self, mode: WaveformMode, scalar_results: HashMap<String, (f32, f32)>) -> SessionResult {
-        // 1. Determine start index based on mode
+         
         let start_index = match mode {
             WaveformMode::Complete => 0,
-            WaveformMode::Windowed(seconds) => {
+            WaveformMode::Windowed { seconds } => {
                 let window_frames = (seconds * self.config.fps_target) as usize;
                 self.timestamps.len().saturating_sub(window_frames)
             },
@@ -209,7 +234,6 @@ impl Session {
             self.last_emitted_timestamp = last;
         }
 
-        // 2. Define Slicing Helpers
         let slice_vec_f32 = |v: &[f32]| -> Vec<f32> {
             if start_index < v.len() { v[start_index..].to_vec() } else { Vec::new() }
         };
@@ -218,8 +242,12 @@ impl Session {
             if start_index < v.len() { v[start_index..].to_vec() } else { Vec::new() }
         };
 
-        let slice_vec_coords = |v: &[[f32; 4]]| -> Vec<[f32; 4]> {
-            if start_index < v.len() { v[start_index..].to_vec() } else { Vec::new() }
+        let slice_vec_coords = |v: &[[f32; 4]]| -> Vec<Vec<f32>> {
+            if start_index < v.len() { 
+                v[start_index..].iter().map(|arr| arr.to_vec()).collect()
+            } else { 
+                Vec::new() 
+            }
         };
 
         let timestamp_slice = slice_vec_f64(&self.timestamps);
@@ -235,7 +263,7 @@ impl Session {
         };
 
         let mut signals_out = HashMap::new();
-        let fs = self.config.fps_target; // Defined local fs for use in processing
+        let fs = self.config.fps_target;  
 
         for vital_id in &self.active_vitals {
             if let Some(meta) = registry::get_vital_meta(vital_id) {
@@ -247,7 +275,6 @@ impl Session {
                     if let Some(buf) = self.signal_data.get(vital_id) {
                         let full_data = buf.compute_average();
                         
-                        // Apply processing (Detrend/Standardize) for UI/Output only
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
                             if full_data.len() >= (proc_cfg.min_window_seconds * fs) as usize {
                                 crate::signal::filters::apply_processing(&full_data, proc_cfg.operation, fs)
@@ -260,7 +287,6 @@ impl Session {
                         
                         waveform_data = slice_vec_f32(&processed_data);
                         
-                        // Slicing confidence to match the waveform slice
                         if let Some(c_buf) = self.signal_confs.get(vital_id) {
                             let full_conf = c_buf.compute_average();
                             waveform_conf = slice_vec_f32(&full_conf);
@@ -305,5 +331,77 @@ impl Session {
             message: "OK".to_string(),
             model_used: self.config.name.clone(),
         }
+    }
+}
+
+// ========================================================================
+// 2. THE PUBLIC SHELL (Exported, FFI-safe types only, Interior Mutability)
+// ========================================================================
+
+#[derive(Debug)]
+#[cfg_attr(feature = "python", pyclass)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub struct Session {
+    core: Mutex<SessionCore>, 
+}
+
+// --- NATIVE & PYTHON IMPLEMENTATION ---
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
+impl Session {
+    #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
+    pub fn new(config: ModelConfig) -> Self {
+        Self {
+            core: Mutex::new(SessionCore::new(config))
+        }
+    }
+
+    pub fn process_chunk(&self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+        let mut guard = self.core.lock().expect("Failed to lock Session core");
+        guard.process_chunk(chunk, mode)
+    }
+}
+
+// --- PYTHON SPECIFIC IMPLEMENTATION ---
+#[cfg(feature = "python")]
+#[pymethods]
+impl Session {
+    // Maps to __init__ in Python
+    // Takes &ModelConfig because PyO3 can provide references to Python objects
+    #[new]
+    pub fn py_new(config: &ModelConfig) -> Self {
+        Self {
+            core: Mutex::new(SessionCore::new(config.clone()))
+        }
+    }
+
+    // Re-expose process_chunk for Python (signature is the same, PyO3 handles conversion)
+    #[pyo3(name = "process_chunk")]
+    pub fn py_process_chunk(&self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+        let mut guard = self.core.lock().expect("Failed to lock Session core");
+        guard.process_chunk(chunk, mode)
+    }
+}
+
+// --- WASM SPECIFIC IMPLEMENTATION ---
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl Session {
+    #[wasm_bindgen(constructor)]
+    pub fn new_js(config_val: JsValue) -> Result<Session, JsError> {
+        let config: ModelConfig = serde_wasm_bindgen::from_value(config_val)?;
+        Ok(Self {
+            core: Mutex::new(SessionCore::new(config))
+        })
+    }
+
+    #[wasm_bindgen(js_name = processChunkJs)]
+    pub fn process_chunk_js(&self, chunk_val: JsValue, mode_val: JsValue) -> Result<JsValue, JsError> {
+        let chunk: InputChunk = serde_wasm_bindgen::from_value(chunk_val)?;
+        let mode: WaveformMode = serde_wasm_bindgen::from_value(mode_val)?;
+        
+        let result = self.process_chunk(chunk, mode); // Uses the method from the uniffi impl block
+        
+        Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 }
