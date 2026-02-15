@@ -35,6 +35,7 @@ pub fn estimate_hrv(
         avg_rate_hint: rate_hint,
         threshold: 0.5,
         refine: true,
+        smooth_input: true,
         ..Default::default()
     };
 

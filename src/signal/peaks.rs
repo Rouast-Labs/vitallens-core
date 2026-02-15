@@ -1,3 +1,5 @@
+use crate::signal::filters;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Peak {
     pub index: usize,
@@ -21,6 +23,7 @@ pub struct PeakOptions {
     pub max_rate_change_per_sec: f32,
     pub interval_buffer: f32,
     pub refine: bool,
+    pub smooth_input: bool,
 }
 
 impl Default for PeakOptions {
@@ -29,11 +32,12 @@ impl Default for PeakOptions {
             fs: 30.0,
             avg_rate_hint: None,
             bounds: SignalBounds { min_rate: 40.0, max_rate: 220.0 },
-            threshold: 2.0,
+            threshold: 1.0,
             window_cycles: 3.0,
             max_rate_change_per_sec: 3.0,
             interval_buffer: 0.25,
             refine: true,
+            smooth_input: false,
         }
     }
 }
@@ -45,16 +49,29 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         return Vec::new();
     }
 
-    // --- 1. Auto-Tune Parameters ---
+    // 1. Optional pre-processing
+    let processed_data_storage;
+    let mut search_radius = 0;
+    let working_signal: &[f32] = if options.smooth_input {
+        let cutoff_hz = options.bounds.max_rate / 60.0;
+        let window = filters::estimate_moving_average_window(options.fs, cutoff_hz, true);
+        search_radius = window / 2;
+        processed_data_storage = filters::moving_average(signal, window);
+        &processed_data_storage
+    } else {
+        signal
+    };
+
+    // 2. Auto-tune parameters
     
     let reference_rate = options.avg_rate_hint.unwrap_or(options.bounds.min_rate);
     let window_seconds = (60.0 / reference_rate) * options.window_cycles;
     
     let radius = ((window_seconds * options.fs) / 2.0).round() as usize;
-    let radius = radius.max(2).min(signal.len() / 2);
+    let radius = radius.max(2).min(working_signal.len() / 2);
 
     let max_possible_rate = if let Some(avg) = options.avg_rate_hint {
-        let duration = signal.len() as f32 / options.fs;
+        let duration = working_signal.len() as f32 / options.fs;
         let drift = options.max_rate_change_per_sec * (duration / 2.0);
         (avg + drift).min(options.bounds.max_rate)
     } else {
@@ -67,29 +84,29 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     let slowest_period = 60.0 / options.bounds.min_rate;
     let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
     
-    // --- 2. Compute Centered Rolling Stats ---
+    // 3. Compute centered rolling stats (z-score algorithm)
     
-    let mut means = vec![0.0; signal.len()];
-    let mut stds = vec![0.0; signal.len()];
+    let mut means = vec![0.0; working_signal.len()];
+    let mut stds = vec![0.0; working_signal.len()];
     
     let mut start = 0;
-    let mut end = radius.min(signal.len() - 1);
+    let mut end = radius.min(working_signal.len() - 1);
     
-    let mut sum: f32 = signal[start..=end].iter().sum();
-    let mut sq_sum: f32 = signal[start..=end].iter().map(|x| x*x).sum();
+    let mut sum: f32 = working_signal[start..=end].iter().sum();
+    let mut sq_sum: f32 = working_signal[start..=end].iter().map(|x| x*x).sum();
     
-    for i in 0..signal.len() {
-        let new_end = (i + radius).min(signal.len() - 1);
+    for i in 0..working_signal.len() {
+        let new_end = (i + radius).min(working_signal.len() - 1);
         if new_end > end {
-            sum += signal[new_end];
-            sq_sum += signal[new_end] * signal[new_end];
+            sum += working_signal[new_end];
+            sq_sum += working_signal[new_end] * working_signal[new_end];
             end = new_end;
         }
         
         let new_start = i.saturating_sub(radius);
         if new_start > start {
-            sum -= signal[start];
-            sq_sum -= signal[start] * signal[start];
+            sum -= working_signal[start];
+            sq_sum -= working_signal[start] * working_signal[start];
             start = new_start;
         }
         
@@ -101,13 +118,13 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         stds[i] = variance.max(0.0).sqrt();
     }
 
-    // --- 3. Peak Detection Logic ---
+    // 4. Peak detection logic
     
     let mut peaks: Vec<Peak> = Vec::new();
     let mut last_peak_idx: Option<usize> = None;
 
-    for i in 1..signal.len()-1 {
-        let val = signal[i];
+    for i in 1..working_signal.len()-1 {
+        let val = working_signal[i];
         let mean = means[i];
         let std = stds[i];
 
@@ -118,37 +135,51 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         };
 
         if is_candidate {
-            if val > signal[i-1] && val >= signal[i+1] {
+            if val > working_signal[i-1] && val >= working_signal[i+1] {
                 
                 let in_refractory_window = match last_peak_idx {
                     Some(last) => (i - last) < min_dist_samples,
                     None => false
                 };
 
+                let search_start = i.saturating_sub(search_radius);
+                let search_end = (i + search_radius + 1).min(signal.len());
+                
+                let mut best_idx = i;
+                let mut best_val = signal[i];
+
+                if search_radius > 0 {
+                    for j in search_start..search_end {
+                        if signal[j] > best_val {
+                            best_val = signal[j];
+                            best_idx = j;
+                        }
+                    }
+                }
+
                 let mut final_peak = Peak {
-                    index: i,
-                    x: i as f32,
-                    y: val,
+                    index: best_idx,
+                    x: best_idx as f32,
+                    y: best_val,
                 };
 
-                if options.refine {
-                    let y_l = signal[i - 1];
-                    let y_c = signal[i];
-                    let y_r = signal[i + 1];
+                if options.refine && best_idx > 0 && best_idx < signal.len() - 1 {
+                    let y_l = signal[best_idx - 1];
+                    let y_c = signal[best_idx];
+                    let y_r = signal[best_idx + 1];
 
-                    let denom = 2.0 * (y_l - 2.0 * y_c + y_r);
+                    let denom: f32 = 2.0 * (y_l - 2.0 * y_c + y_r);
                     if denom.abs() > 1e-6 {
                         let delta = (y_l - y_r) / denom;
                         if delta.abs() <= 0.5 {
-                            final_peak.x = i as f32 + delta;
-                            final_peak.y = y_c - 0.25 * (y_l - y_r) * delta;
+                            final_peak.x = best_idx as f32 + delta;
                         }
                     }
                 }
 
                 if in_refractory_window {
                     if let Some(last_peak) = peaks.last() {
-                        let left_neighbor_higher = signal[i-1] > last_peak.y;
+                        let left_neighbor_higher = signal[i-1] > last_peak.y; 
                         let right_neighbor_higher = signal[i+1] > last_peak.y;
                         
                         if final_peak.y > last_peak.y && (left_neighbor_higher || right_neighbor_higher) {
@@ -165,7 +196,7 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         }
     }
 
-    // --- 4. Segmentation ---
+    // 5. Segmentation
     
     if peaks.is_empty() {
         return Vec::new();

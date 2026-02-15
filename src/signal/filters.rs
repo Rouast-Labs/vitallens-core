@@ -43,6 +43,34 @@ pub fn moving_average(signal: &[f32], window_size: usize) -> Vec<f32> {
     result
 }
 
+/// Estimates the required moving average window size to achieve a specific
+/// low-pass cutoff frequency.
+///
+/// # Arguments
+/// * `fs` - Sampling frequency
+/// * `cutoff_hz` - Desired cutoff frequency
+/// * `force_odd` - If true, ensures the result is odd (floors even numbers, e.g., 4 -> 3)
+pub fn estimate_moving_average_window(fs: f32, cutoff_hz: f32, force_odd: bool) -> usize {
+    if fs <= 0.0 || cutoff_hz <= 0.0 {
+        return 1;
+    }
+
+    let f = cutoff_hz / fs;
+    if f.abs() < 1e-6 {
+        return usize::MAX; 
+    }
+
+    let size = (0.196202 + f * f).sqrt() / f;
+    let mut size_int = size as usize;
+    
+    if force_odd && size_int % 2 == 0 {
+        // Conservative approach: 4 -> 3 rather than 5, to avoid over-smoothing
+        size_int = size_int.saturating_sub(1);
+    }
+    
+    size_int.max(1)
+}
+
 /// Removes low-frequency trends by subtracting a moving average.
 /// This is a high-pass filter equivalent suitable for rPPG.
 pub fn detrend(signal: &[f32], fs: f32) -> Vec<f32> {
@@ -106,6 +134,18 @@ mod tests {
         assert!((result[1] - 2.0).abs() < 1e-5);
         assert!((result[2] - 3.0).abs() < 1e-5);
         assert!((result[3] - 4.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_window_estimation_oddness() {
+        // Fs=30, Cutoff=2.5 => Raw ~5.4 => 5
+        let w = estimate_moving_average_window(30.0, 2.5, true);
+        assert_eq!(w, 5);
+
+        // Fs=30, Cutoff=3.5 => Raw ~3.8 => 3
+        // If it were even (e.g. 4), we'd expect it to drop to 3
+        let w2 = estimate_moving_average_window(30.0, 3.5, true);
+        assert!(w2 % 2 != 0);
     }
 
     #[test]
