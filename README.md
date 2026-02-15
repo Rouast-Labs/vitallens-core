@@ -53,7 +53,7 @@ cargo build --release --target x86_64-apple-ios --lib
 # cargo build --release --target aarch64-apple-ios-sim --lib
 
 # For Device (iPhone)
-# cargo build --release --target aarch64-apple-ios --lib
+cargo build --release --target aarch64-apple-ios --lib
 ```
 
 **Step B: Generate Swift Bindings**

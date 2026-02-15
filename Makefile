@@ -19,10 +19,12 @@ check-python:
 	# 'maturin build' is safer for a check.
 	maturin build --features python
 
-# 3. iOS Target Check
+# 3. iOS Target Checks (Simulator & Device)
 check-ios:
-	@echo "🍎 Checking iOS Build..."
+	@echo "🍎 Checking iOS Build (Simulator x86_64)..."
 	cargo build --release --target x86_64-apple-ios --lib
+	@echo "📱 Checking iOS Build (Device arm64)..."
+	cargo build --release --target aarch64-apple-ios --lib
 
 # 4. WebAssembly Check
 check-web:
