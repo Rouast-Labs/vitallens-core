@@ -151,7 +151,6 @@ impl SessionCore {
 
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-        let fs = self.config.fps_target; // TODO: Critical - need to use computed, actual fs
 
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
@@ -164,12 +163,13 @@ impl SessionCore {
                             .map(|b| b.compute_average())
                             .unwrap_or_else(|| vec![1.0; full_data.len()]);
                         let available_frames = full_data.len();
-                        let min_frames = (cfg.min_window_seconds * fs) as usize;
+                        let target_fs = self.config.fps_target;
+                        let min_frames = (cfg.min_window_seconds * target_fs) as usize;
                         if available_frames >= min_frames {
                             let take_frames = match mode {
                                 WaveformMode::Global => available_frames,
                                 _ => {
-                                    let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
+                                    let preferred_frames = (cfg.preferred_window_seconds * target_fs) as usize;
                                     preferred_frames.min(available_frames)
                                 }
                             };
@@ -177,6 +177,22 @@ impl SessionCore {
                             let start_idx = available_frames - take_frames;
                             let data_slice = &full_data[start_idx..];
                             let conf_slice = &full_conf[start_idx..];
+
+                            let ts_len = self.timestamps.len();
+                            let slice_len = data_slice.len();
+                            let ts_start = ts_len.saturating_sub(slice_len);
+
+                            let actual_fs = if ts_len >= 2 && slice_len >= 2 {
+                                let relevant_timestamps = &self.timestamps[ts_start..];
+                                let duration = relevant_timestamps.last().unwrap() - relevant_timestamps.first().unwrap();
+                                if duration > 0.0 {
+                                    (relevant_timestamps.len() - 1) as f32 / duration as f32
+                                } else {
+                                    target_fs
+                                }
+                            } else {
+                                target_fs
+                            };
 
                             let slice_avg_conf = if !conf_slice.is_empty() {
                                 conf_slice.iter().sum::<f32>() / conf_slice.len() as f32
@@ -188,23 +204,23 @@ impl SessionCore {
                                 CalculationMethod::Rate(strategy) => {
                                     let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
                                     let res = crate::signal::rate::estimate_rate(
-                                        data_slice, fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
+                                        data_slice, actual_fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
                                     );                                    
                                     (res.value, slice_avg_conf)
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let ts_slice = &self.timestamps[start_idx..];
-                                    crate::signal::hrv::estimate_hrv(data_slice, fs, *metric, ts_slice, conf_slice)
+                                    crate::signal::hrv::estimate_hrv(data_slice, actual_fs, *metric, ts_slice, conf_slice)
                                 },
                                 CalculationMethod::Average => {
                                     let (avg_val, _) = crate::signal::calculate_average(data_slice);
                                     (avg_val, slice_avg_conf)
                                 },
                                 CalculationMethod::BpSystolic => {
-                                    crate::signal::bp::extract_systolic_pressure(data_slice, fs, conf_slice)
+                                    crate::signal::bp::extract_systolic_pressure(data_slice, actual_fs, conf_slice)
                                 },
                                 CalculationMethod::BpDiastolic => {
-                                    crate::signal::bp::extract_diastolic_pressure(data_slice, fs, conf_slice)
+                                    crate::signal::bp::extract_diastolic_pressure(data_slice, actual_fs, conf_slice)
                                 },
                             };
 

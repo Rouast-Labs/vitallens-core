@@ -10,8 +10,8 @@ pub enum VitalType {
 pub struct DerivationConfig {
     pub source_signal: String,
     pub method: CalculationMethod,
-    pub min_window_seconds: f32, // TODO: Rename
-    pub preferred_window_seconds: f32, // TODO: Rename
+    pub min_window_seconds: f32,
+    pub preferred_window_seconds: f32,
     pub min_value: f32,
     pub max_value: f32,
     pub order: u8, 
