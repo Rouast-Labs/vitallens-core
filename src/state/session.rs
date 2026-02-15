@@ -151,7 +151,7 @@ impl SessionCore {
 
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-        let fs = self.config.fps_target;  
+        let fs = self.config.fps_target; // TODO: Critical - need to use computed, actual fs
 
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
@@ -184,6 +184,7 @@ impl SessionCore {
                                     let res = crate::signal::rate::estimate_rate(
                                         slice, fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
                                     );
+                                    // TODO: We need to return the average conf of our slice instead
                                     (res.value, res.confidence)
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
@@ -195,8 +196,20 @@ impl SessionCore {
                                     crate::signal::hrv::estimate_hrv(slice, fs, *metric, ts_slice, conf_slice)
                                 },
                                 CalculationMethod::Average => crate::signal::calculate_average(slice),
-                                CalculationMethod::BpSystolic => crate::signal::bp::extract_systolic_pressure(slice, fs),
-                                CalculationMethod::BpDiastolic => crate::signal::bp::extract_diastolic_pressure(slice, fs),
+                                CalculationMethod::BpSystolic => {
+                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
+                                        .map(|b| b.compute_average())
+                                        .unwrap_or_else(|| vec![1.0; available_frames]);
+                                    let conf_slice = &conf_data[start_idx..];                                    
+                                    crate::signal::bp::extract_systolic_pressure(slice, fs, conf_slice)
+                                },
+                                CalculationMethod::BpDiastolic => {
+                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
+                                        .map(|b| b.compute_average())
+                                        .unwrap_or_else(|| vec![1.0; available_frames]);
+                                    let conf_slice = &conf_data[start_idx..];
+                                    crate::signal::bp::extract_diastolic_pressure(slice, fs, conf_slice)
+                                },
                             };
 
                             if val >= cfg.min_value && val <= cfg.max_value {
