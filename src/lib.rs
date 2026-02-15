@@ -6,9 +6,6 @@ pub mod state;
 pub mod types;
 mod bindings;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod mobile;
-
 // --- TIER 1: STATEFUL SESSION (iOS, JS, Python Apps) ---
 // Re-export these so they appear at the top level for UniFFI/Wasm
 pub use state::session::Session;
@@ -28,7 +25,7 @@ fn vitallens_core(_py: Python, m: &PyModule) -> PyResult<()> {
     // 1. Export the Session class
     m.add_class::<Session>()?;
 
-    // 2. Export the Data Types (CRITICAL FIX)
+    // 2. Export the Data types
     m.add_class::<types::ModelConfig>()?;
     m.add_class::<types::InputChunk>()?;
     m.add_class::<types::FaceInput>()?;
@@ -37,6 +34,7 @@ fn vitallens_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<types::FaceResult>()?;
 
     // 3. Export the Stateless Math functions
+    // This calls code inside src/bindings/python.rs
     bindings::python::register_functions(m)?;
     
     Ok(())
