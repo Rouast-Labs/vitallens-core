@@ -47,6 +47,7 @@ pub fn estimate_hrv(
         crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
         crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
         crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
+        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
     };
 
     (value, min_conf)
@@ -183,6 +184,53 @@ pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
     } else {
         0.0
     }
+}
+
+/// Calculates Baevsky Stress Index (SI).
+/// SI = AMo / (2 * Mo * MxDMn)
+/// - AMo: Amplitude of Mode (percent of intervals in the mode bin)
+/// - Mo: Mode (most frequent interval value in seconds)
+/// - MxDMn: Variational range (max - min interval in seconds)
+pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
+    if nn_intervals_ms.len() < 5 { return 0.0; }
+
+    let bin_size = 50.0; // Standard 50ms bins
+    let min_val = nn_intervals_ms.iter().fold(f32::INFINITY, |a, &b| a.min(b));
+    let max_val = nn_intervals_ms.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+
+    if (max_val - min_val).abs() < f32::EPSILON { return 0.0; }
+
+    let num_bins = ((max_val - min_val) / bin_size).ceil() as usize + 1;
+    let mut histogram = vec![0; num_bins];
+
+    for &interval in nn_intervals_ms {
+        let bin_idx = ((interval - min_val) / bin_size).floor() as usize;
+        if bin_idx < histogram.len() {
+            histogram[bin_idx] += 1;
+        }
+    }
+
+    let (max_count_idx, &max_count) = histogram.iter().enumerate()
+        .max_by_key(|&(_, count)| count)
+        .unwrap_or((0, &0));
+
+    if max_count == 0 { return 0.0; }
+
+    // AMo: Amplitude of Mode (%)
+    let amo = (max_count as f32 / nn_intervals_ms.len() as f32) * 100.0;
+
+    // Mo: Mode (seconds) - center of the bin
+    let mode_ms = min_val + (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
+    let mo_sec = mode_ms / 1000.0;
+
+    // MxDMn: Range (seconds)
+    let mxdmn_sec = (max_val - min_val) / 1000.0;
+    
+    // Prevent division by zero
+    if mo_sec <= 0.0 || mxdmn_sec <= 0.0 { return 0.0; }
+
+    // Formula: SI = AMo / (2 * Mo * MxDMn)
+    amo / (2.0 * mo_sec * mxdmn_sec)
 }
 
 // --- Helpers ---
@@ -532,5 +580,65 @@ mod tests {
         
         // High HF power means LF/HF ratio should be very low (< 1.0)
         assert!(ratio < 0.5, "Expected low ratio for high-frequency oscillation, got {}", ratio);
+    }
+
+    #[test]
+    fn test_calculate_stress_index_steady_rhythm() {
+        // High stress simulation: Most intervals are very similar
+        // Intervals: 10 of 1000ms, 2 of 950ms, 2 of 1050ms
+        let mut intervals = vec![1000.0; 10];
+        intervals.extend_from_slice(&[950.0, 950.0, 1050.0, 1050.0]);
+        
+        let si = calculate_stress_index(&intervals);
+        
+        // AMo = 10/14 = ~71.4%
+        // Mo = 1.0s
+        // MxDMn = (1050 - 950) / 1000 = 0.1s
+        // SI = 71.4 / (2 * 1.0 * 0.1) = ~357
+        assert!(si > 300.0 && si < 400.0, "Expected SI ~357, got {}", si);
+    }
+
+    #[test]
+    fn test_calculate_stress_index_high_variability() {
+        // Low stress simulation: Intervals spread across many bins
+        let intervals = vec![600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0, 1200.0];
+        
+        let si = calculate_stress_index(&intervals);
+        
+        // Range is large (0.6s), and intervals are spread (AMo is low)
+        // SI should be significantly lower than the steady case
+        assert!(si < 50.0, "Expected low SI for high variability, got {}", si);
+    }
+
+    #[test]
+    fn test_calculate_stress_index_minimum_data() {
+        // Implementation requires at least 5 intervals
+        let short_intervals = vec![1000.0, 1010.0, 990.0, 1000.0];
+        let si = calculate_stress_index(&short_intervals);
+        assert_eq!(si, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_stress_index_identical_intervals() {
+        // Prevent division by zero if MxDMn is 0
+        let intervals = vec![1000.0; 10];
+        let si = calculate_stress_index(&intervals);
+        assert_eq!(si, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_stress_index_binning_boundary() {
+        // Ensure bins (50ms) are handled correctly.
+        // 1000, 1010, 1020, 1030, 1040 should all fall into the same bin 
+        // if the min_val starts at 1000.
+        let intervals = vec![1000.0, 1010.0, 1020.0, 1030.0, 1040.0, 1200.0];
+        let si = calculate_stress_index(&intervals);
+        
+        assert!(si > 0.0);
+        // AMo should be 5/6 (83.3%)
+        // MxDMn should be 0.2s
+        // Mo should be ~1.025s
+        // SI = 83.3 / (2 * 1.025 * 0.2) = ~203
+        assert!(si > 190.0 && si < 220.0, "Expected SI ~203, got {}", si);
     }
 }

@@ -222,6 +222,12 @@ impl SessionCore {
                                 CalculationMethod::BpDiastolic => {
                                     crate::signal::bp::extract_diastolic_pressure(data_slice, actual_fs, conf_slice)
                                 },
+                                CalculationMethod::PulsePressure => {
+                                    crate::signal::bp::extract_pulse_pressure(data_slice, actual_fs, conf_slice)
+                                },
+                                CalculationMethod::IeRatio => {
+                                    crate::signal::resp::calculate_ie_ratio(data_slice, actual_fs, conf_slice)
+                                },
                             };
 
                             if val >= cfg.min_value && val <= cfg.max_value {
@@ -425,3 +431,5 @@ impl Session {
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 }
+
+// TODO: Basic tests?

@@ -22,6 +22,7 @@ pub enum HrvMetric {
     Sdnn,
     Rmssd,
     LfHf,
+    StressIndex,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +32,8 @@ pub enum CalculationMethod {
     Average,
     BpSystolic,
     BpDiastolic,
+    PulsePressure,
+    IeRatio,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -58,10 +61,10 @@ pub struct VitalMeta {
 
 // --- THE REGISTRY ---
 
-// TODO: What other vitals could we support given our provided signals?
-
 pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {   
     match vital_id {
+
+        // PPG Waveform
         "ppg_waveform" | "ppg" => Some(VitalMeta {
             id: "ppg_waveform".to_string(),
             vital_type: VitalType::Provided,
@@ -73,6 +76,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "unitless".to_string(),
             display_name: "PPG Waveform".to_string(),
         }),
+
+        // Respiratory Waveform
         "respiratory_waveform" | "resp_waveform" | "resp" => Some(VitalMeta {
             id: "respiratory_waveform".to_string(),
             vital_type: VitalType::Provided,
@@ -84,6 +89,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "unitless".to_string(),
             display_name: "RESP Waveform".to_string(),
         }),
+
+        // Heart Rate
         "heart_rate" | "hr" | "pulse" => Some(VitalMeta {
             id: "heart_rate".to_string(),
             vital_type: VitalType::Derived,
@@ -102,6 +109,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "bpm".to_string(),
             display_name: "Heart Rate".to_string(),
         }),
+
+        // Respiratory Rate
         "respiratory_rate" | "rr" | "resp_rate" => Some(VitalMeta {
             id: "respiratory_rate".to_string(),
             vital_type: VitalType::Derived,
@@ -120,6 +129,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "bpm".to_string(),
             display_name: "Respiratory Rate".to_string(),
         }),
+
+        // HRV (SDNN)
         "hrv_sdnn" | "sdnn" => Some(VitalMeta {
             id: "hrv_sdnn".to_string(),
             vital_type: VitalType::Derived,
@@ -136,6 +147,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "ms".to_string(),
             display_name: "Heart Rate Variability (SDNN)".to_string(),
         }),
+
+        // HRV (RMSSD)
         "hrv_rmssd" | "rmssd" => Some(VitalMeta {
             id: "hrv_rmssd".to_string(),
             vital_type: VitalType::Derived,
@@ -152,6 +165,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "ms".to_string(),
             display_name: "Heart Rate Variability (RMSSD)".to_string(),
         }),
+
+        // HRV (LF/HF)
         "hrv_lfhf" | "lfhf" => Some(VitalMeta {
             id: "hrv_lfhf".to_string(),
             vital_type: VitalType::Derived,
@@ -168,6 +183,44 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "ratio".to_string(),
             display_name: "Heart Rate Variability (LF/HF)".to_string(),
         }),
+
+        // I:E Ratio
+        "ie_ratio" | "resp_ie" => Some(VitalMeta {
+            id: "ie_ratio".to_string(),
+            vital_type: VitalType::Derived,
+            derivations: vec![DerivationConfig {
+                source_signal: "respiratory_waveform".to_string(),
+                method: CalculationMethod::IeRatio,
+                min_window_seconds: 15.0,
+                preferred_window_seconds: 30.0,
+                min_value: 0.2,
+                max_value: 5.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "ratio".to_string(),
+            display_name: "I:E Ratio".to_string(),
+        }),
+
+        // Stress Index (SI)
+        "stress_index" | "si" => Some(VitalMeta {
+            id: "stress_index".to_string(),
+            vital_type: VitalType::Derived,
+            derivations: vec![DerivationConfig {
+                source_signal: "ppg_waveform".to_string(),
+                method: CalculationMethod::HrvFromPeaks(HrvMetric::StressIndex),
+                min_window_seconds: 30.0,
+                preferred_window_seconds: 60.0,
+                min_value: 0.0,
+                max_value: 1000.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "SI".to_string(),
+            display_name: "Stress Index".to_string(),
+        }),
+
+        // SpO2
         "spo2" => Some(VitalMeta {
             id: "spo2".to_string(),
             vital_type: VitalType::Provided,
@@ -184,6 +237,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "%".to_string(),
             display_name: "SpO2".to_string(),
         }),
+
+        // Arterial Blood Pressure Waveform
         "abp_waveform" => Some(VitalMeta {
             id: "abp_waveform".to_string(),
             vital_type: VitalType::Provided,
@@ -195,6 +250,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "mmHg".to_string(),
             display_name: "ABP Waveform".to_string(),
         }),
+
+        // Systolic Blood Pressure
         "sbp" | "bp_sys" | "systolic" => Some(VitalMeta {
             id: "sbp".to_string(),
             vital_type: VitalType::Derived,
@@ -222,6 +279,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "mmHg".to_string(),
             display_name: "Systolic Blood Pressure".to_string(),
         }),
+
+        // Diastolic Blood Pressure
         "dbp" | "bp_dia" | "diastolic" => Some(VitalMeta {
             id: "dbp".to_string(),
             vital_type: VitalType::Derived,
@@ -249,6 +308,44 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "mmHg".to_string(),
             display_name: "Diastolic Blood Pressure".to_string(),
         }),
+
+        // Mean Arterial Pressure (MAP)
+        "map" | "mean_arterial_pressure" => Some(VitalMeta {
+            id: "map".to_string(),
+            vital_type: VitalType::Derived,
+            derivations: vec![DerivationConfig {
+                source_signal: "abp_waveform".to_string(),
+                method: CalculationMethod::Average,
+                min_window_seconds: 5.0,
+                preferred_window_seconds: 10.0,
+                min_value: 40.0,
+                max_value: 200.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "mmHg".to_string(),
+            display_name: "Mean Arterial Pressure".to_string(),
+        }),
+
+        // Pulse Pressure (PP)
+        "pp" | "pulse_pressure" => Some(VitalMeta {
+            id: "pulse_pressure".to_string(),
+            vital_type: VitalType::Derived,
+            // TODO: Could add derivation from SBP + DBP if we add multi-source-signal support
+            derivations: vec![DerivationConfig {
+                source_signal: "abp_waveform".to_string(),
+                method: CalculationMethod::PulsePressure,
+                min_window_seconds: 5.0,
+                preferred_window_seconds: 10.0,
+                min_value: 10.0,
+                max_value: 100.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "mmHg".to_string(),
+            display_name: "Pulse Pressure".to_string(),
+        }),
+
         _ => None
     }
 }

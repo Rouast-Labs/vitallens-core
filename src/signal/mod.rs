@@ -4,6 +4,7 @@ pub mod peaks;
 pub mod rate;
 pub mod hrv;
 pub mod bp;
+pub mod resp;
 
 pub use hrv::estimate_hrv;
 pub use rate::estimate_rate;
