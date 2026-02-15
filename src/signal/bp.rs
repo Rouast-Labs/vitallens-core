@@ -1,4 +1,4 @@
-use crate::signal::peaks::{find_peaks, PeakOptions, Peak};
+use crate::signal::peaks::{find_peaks, PeakOptions};
 
 pub struct BpResult {
     pub sbp: f32,

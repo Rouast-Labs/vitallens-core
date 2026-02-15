@@ -158,57 +158,53 @@ impl SessionCore {
         for vital_id in vital_ids {
             if let Some(meta) = self.vital_metas.get(&vital_id).cloned() { 
                 for cfg in &meta.derivations {
-                    if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {                        
+                    if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
                         let full_data = source_buf.compute_average();
+                        let full_conf = self.signal_confs.get(&cfg.source_signal)
+                            .map(|b| b.compute_average())
+                            .unwrap_or_else(|| vec![1.0; full_data.len()]);
                         let available_frames = full_data.len();
                         let min_frames = (cfg.min_window_seconds * fs) as usize;
                         if available_frames >= min_frames {
                             let take_frames = match mode {
                                 WaveformMode::Global => available_frames,
                                 _ => {
-                                    if let WaveformMode::Windowed { .. } = mode {
-                                        let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
-                                        preferred_frames.min(available_frames)
-                                    } else {
-                                        let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
-                                        preferred_frames.min(available_frames)
-                                    }
+                                    let preferred_frames = (cfg.preferred_window_seconds * fs) as usize;
+                                    preferred_frames.min(available_frames)
                                 }
                             };
+
                             let start_idx = available_frames - take_frames;
-                            let slice = &full_data[start_idx..];
+                            let data_slice = &full_data[start_idx..];
+                            let conf_slice = &full_conf[start_idx..];
+
+                            let slice_avg_conf = if !conf_slice.is_empty() {
+                                conf_slice.iter().sum::<f32>() / conf_slice.len() as f32
+                            } else {
+                                0.0
+                            };
 
                             let (val, conf) = match &cfg.method {
                                 CalculationMethod::Rate(strategy) => {
-                                    let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };                                    
+                                    let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
                                     let res = crate::signal::rate::estimate_rate(
-                                        slice, fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
-                                    );
-                                    // TODO: We need to return the average conf of our slice instead
-                                    (res.value, res.confidence)
+                                        data_slice, fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
+                                    );                                    
+                                    (res.value, slice_avg_conf)
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let ts_slice = &self.timestamps[start_idx..];
-                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
-                                        .map(|b| b.compute_average())
-                                        .unwrap_or_else(|| vec![1.0; available_frames]);
-                                    let conf_slice = &conf_data[start_idx..];
-                                    crate::signal::hrv::estimate_hrv(slice, fs, *metric, ts_slice, conf_slice)
+                                    crate::signal::hrv::estimate_hrv(data_slice, fs, *metric, ts_slice, conf_slice)
                                 },
-                                CalculationMethod::Average => crate::signal::calculate_average(slice),
+                                CalculationMethod::Average => {
+                                    let (avg_val, _) = crate::signal::calculate_average(data_slice);
+                                    (avg_val, slice_avg_conf)
+                                },
                                 CalculationMethod::BpSystolic => {
-                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
-                                        .map(|b| b.compute_average())
-                                        .unwrap_or_else(|| vec![1.0; available_frames]);
-                                    let conf_slice = &conf_data[start_idx..];                                    
-                                    crate::signal::bp::extract_systolic_pressure(slice, fs, conf_slice)
+                                    crate::signal::bp::extract_systolic_pressure(data_slice, fs, conf_slice)
                                 },
                                 CalculationMethod::BpDiastolic => {
-                                    let conf_data = self.signal_confs.get(&cfg.source_signal)
-                                        .map(|b| b.compute_average())
-                                        .unwrap_or_else(|| vec![1.0; available_frames]);
-                                    let conf_slice = &conf_data[start_idx..];
-                                    crate::signal::bp::extract_diastolic_pressure(slice, fs, conf_slice)
+                                    crate::signal::bp::extract_diastolic_pressure(data_slice, fs, conf_slice)
                                 },
                             };
 
