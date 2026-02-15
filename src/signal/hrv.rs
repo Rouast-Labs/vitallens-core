@@ -1,4 +1,5 @@
-use crate::signal::peaks::Peak;
+use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks};
+use crate::registry::HrvMetric;
 
 #[derive(Debug, Clone, Copy)]
 pub struct HrvOptions {
@@ -25,12 +26,19 @@ pub fn estimate_hrv(
     metric: crate::registry::HrvMetric, 
     timestamps: &[f64],
     confidence: &[f32],
+    bounds: SignalBounds,
+    rate_hint: Option<f32>
 ) -> (f32, f32) {
-    let options = crate::signal::peaks::PeakOptions {
+    let options = PeakOptions {
         fs,
+        bounds,
+        avg_rate_hint: rate_hint,
+        threshold: 0.5,
+        refine: true,
         ..Default::default()
     };
-    let sequences = crate::signal::peaks::find_peaks(signal, options);
+
+    let sequences = find_peaks(signal, options);
 
     let hrv_opts = HrvOptions {
         fs_fallback: fs,

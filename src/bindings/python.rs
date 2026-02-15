@@ -5,6 +5,7 @@ use numpy::PyReadonlyArray1;
 use crate::signal;
 use crate::signal::rate::{RateBounds, RateStrategy};
 use crate::registry::HrvMetric;
+use crate::signal::peaks::SignalBounds;
 
 pub fn register_functions(m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
@@ -28,6 +29,19 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
 #[pyfunction]
 fn estimate_hrv_sdnn(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
-    let (val, conf) = signal::estimate_hrv(s, fs, HrvMetric::Sdnn, &[], &[]);
+    
+    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
+    let rate_hint = None;
+
+    let (val, conf) = signal::estimate_hrv(
+        s, 
+        fs, 
+        HrvMetric::Sdnn, 
+        &[], 
+        &[], 
+        bounds, 
+        rate_hint
+    );
+    
     Ok((val, conf))
 }

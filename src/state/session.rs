@@ -4,6 +4,7 @@ use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalR
 use crate::state::buffers::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
+use crate::signal::peaks::SignalBounds;
 
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
@@ -210,7 +211,17 @@ impl SessionCore {
                                 },
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let ts_slice = &self.timestamps[start_idx..];
-                                    crate::signal::hrv::estimate_hrv(data_slice, actual_fs, *metric, ts_slice, conf_slice)
+                                    let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
+                                    let bounds = SignalBounds { min_rate: 40.0, max_rate: 240.0 };
+                                    crate::signal::hrv::estimate_hrv(
+                                        data_slice,
+                                        actual_fs,
+                                        *metric,
+                                        ts_slice,
+                                        conf_slice,
+                                        bounds,
+                                        rate_hint
+                                    )
                                 },
                                 CalculationMethod::Average => {
                                     let (avg_val, _) = crate::signal::calculate_average(data_slice);

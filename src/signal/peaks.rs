@@ -47,16 +47,12 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
 
     // --- 1. Auto-Tune Parameters ---
     
-    // A. Window Size (Centered)
-    // Target 3.0 cycles of the SLOWEST expected rate (Robust baseline estimation)
     let reference_rate = options.avg_rate_hint.unwrap_or(options.bounds.min_rate);
     let window_seconds = (60.0 / reference_rate) * options.window_cycles;
     
-    // Half-width (radius) of the window
     let radius = ((window_seconds * options.fs) / 2.0).round() as usize;
     let radius = radius.max(2).min(signal.len() / 2);
 
-    // B. Min Distance (Refractory Period)
     let max_possible_rate = if let Some(avg) = options.avg_rate_hint {
         let duration = signal.len() as f32 / options.fs;
         let drift = options.max_rate_change_per_sec * (duration / 2.0);
@@ -68,20 +64,14 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     let min_dist_seconds = (60.0 / max_possible_rate) * (1.0 - options.interval_buffer);
     let min_dist_samples = (min_dist_seconds * options.fs) as usize;
 
-    // C. Max Gap (Segmentation)
-    // Allow up to 2.5x the period of the slowest allowed rate
     let slowest_period = 60.0 / options.bounds.min_rate;
     let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
-
+    
     // --- 2. Compute Centered Rolling Stats ---
     
-    // We compute Mean and StdDev for every point using a sliding window.
-    // O(N) optimized implementation.
     let mut means = vec![0.0; signal.len()];
     let mut stds = vec![0.0; signal.len()];
     
-    // Initialize First Window [0, radius] (Asymmetric start)
-    // We treat the "window" as the range [start, end] inclusive.
     let mut start = 0;
     let mut end = radius.min(signal.len() - 1);
     
@@ -89,8 +79,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     let mut sq_sum: f32 = signal[start..=end].iter().map(|x| x*x).sum();
     
     for i in 0..signal.len() {
-        // Update Window: Slide right
-        // If we can extend to the right, add new element
         let new_end = (i + radius).min(signal.len() - 1);
         if new_end > end {
             sum += signal[new_end];
@@ -98,7 +86,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
             end = new_end;
         }
         
-        // If we must shrink from the left (window moved past), remove old element
         let new_start = i.saturating_sub(radius);
         if new_start > start {
             sum -= signal[start];
@@ -116,17 +103,14 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
 
     // --- 3. Peak Detection Logic ---
     
-    let mut peaks = Vec::new();
+    let mut peaks: Vec<Peak> = Vec::new();
     let mut last_peak_idx: Option<usize> = None;
 
-    // Iterate [1..len-1] because we need i-1 and i+1 for local max check
     for i in 1..signal.len()-1 {
         let val = signal[i];
         let mean = means[i];
         let std = stds[i];
 
-        // A. Z-Score Candidate check
-        // We require non-zero std-dev to avoid div/0 on flat signals
         let is_candidate = if std > 1e-6 {
              (val - mean) > options.threshold * std
         } else {
@@ -134,39 +118,46 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         };
 
         if is_candidate {
-            // B. Local Maxima Check
             if val > signal[i-1] && val >= signal[i+1] {
                 
-                // C. Refractory Check
-                let is_refractory = match last_peak_idx {
+                let in_refractory_window = match last_peak_idx {
                     Some(last) => (i - last) < min_dist_samples,
                     None => false
                 };
 
-                if !is_refractory {
-                    // D. Refinement
-                    let mut final_peak = Peak {
-                        index: i,
-                        x: i as f32,
-                        y: val,
-                    };
+                let mut final_peak = Peak {
+                    index: i,
+                    x: i as f32,
+                    y: val,
+                };
 
-                    if options.refine {
-                        let y_l = signal[i - 1];
-                        let y_c = signal[i];
-                        let y_r = signal[i + 1];
+                if options.refine {
+                    let y_l = signal[i - 1];
+                    let y_c = signal[i];
+                    let y_r = signal[i + 1];
 
-                        let denom = 2.0 * (y_l - 2.0 * y_c + y_r);
-                        if denom.abs() > 1e-6 {
-                            let delta = (y_l - y_r) / denom;
-                            // Guard: Only accept small adjustments
-                            if delta.abs() <= 0.5 {
-                                final_peak.x = i as f32 + delta;
-                                final_peak.y = y_c - 0.25 * (y_l - y_r) * delta;
-                            }
+                    let denom = 2.0 * (y_l - 2.0 * y_c + y_r);
+                    if denom.abs() > 1e-6 {
+                        let delta = (y_l - y_r) / denom;
+                        if delta.abs() <= 0.5 {
+                            final_peak.x = i as f32 + delta;
+                            final_peak.y = y_c - 0.25 * (y_l - y_r) * delta;
                         }
                     }
-                    
+                }
+
+                if in_refractory_window {
+                    if let Some(last_peak) = peaks.last() {
+                        let left_neighbor_higher = signal[i-1] > last_peak.y;
+                        let right_neighbor_higher = signal[i+1] > last_peak.y;
+                        
+                        if final_peak.y > last_peak.y && (left_neighbor_higher || right_neighbor_higher) {
+                            peaks.pop();
+                            peaks.push(final_peak);
+                            last_peak_idx = Some(i);
+                        }
+                    }
+                } else {
                     peaks.push(final_peak);
                     last_peak_idx = Some(i);
                 }
@@ -198,8 +189,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
 
     segments
 }
-
-// TODO: Get some real signal samples for advanced testing
 
 #[cfg(test)]
 mod tests {
@@ -267,7 +256,6 @@ mod tests {
 
     #[test]
     fn peak_03_max_rate_gating() {
-        // [FIXED] Scenario: 360 BPM (6Hz).
         // Max HR is 220 BPM (3.66 Hz).
         // 6Hz is clearly faster than 3.66Hz, so beats should be skipped.
         let fs = 30.0;
@@ -342,7 +330,6 @@ mod tests {
 
     #[test]
     fn peak_06_baseline_wander() {
-        // [FIXED] Reduce drift amplitude from 5.0 to 2.0.
         // If drift is too massive, its variance hides the pulse variance.
         let fs = 30.0;
         let pulse = mock_sine(fs, 1.0, 5.0);
