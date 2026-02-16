@@ -34,6 +34,7 @@ pub fn estimate_hrv(
         bounds,
         avg_rate_hint: rate_hint,
         threshold: 0.5,
+        max_rate_change_per_sec: 1.0,
         refine: true,
         smooth_input: true,
         ..Default::default()

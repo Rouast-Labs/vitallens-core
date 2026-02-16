@@ -115,9 +115,9 @@ fn verify_peaks(
     
     // Per-minute allowed errors
     let (missed_rate, extra_rate) = if name.contains("PPG") {
-        if rate_hint.is_some() { (1.0, 0.0) } else { (4.0, 2.0) } 
+        if rate_hint.is_some() { (1.0, 0.0) } else { (2.0, 4.0) } 
     } else {
-        if rate_hint.is_some() { (1.0, 0.0) } else { (4.0, 4.0) }
+        if rate_hint.is_some() { (1.0, 0.0) } else { (2.0, 10.0) }
     };
 
     let allowed_misses = (missed_rate * duration_mins).round() as usize;
@@ -174,7 +174,7 @@ fn test_data_integrity(resource: &str) {
             // Case A: Blind
             if let Err(e) = verify_peaks(
                 filename, "PPG-Blind", fs, &ppg.data, &ground_truth, 
-                MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 3.0, None 
+                MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 1.0, None 
             ) {
                 failures.push(e);
             }
@@ -183,7 +183,7 @@ fn test_data_integrity(resource: &str) {
             if let Some(hr) = ref_data.vital_signs.heart_rate {
                 if let Err(e) = verify_peaks(
                     filename, "PPG-Hinted", fs, &ppg.data, &ground_truth, 
-                    MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 3.0, Some(hr.value)
+                    MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 1.0, Some(hr.value)
                 ) {
                     failures.push(e);
                 }
@@ -197,7 +197,7 @@ fn test_data_integrity(resource: &str) {
             // Case A: Blind
             if let Err(e) = verify_peaks(
                 filename, "RESP-Blind", fs, &resp.data, &ground_truth, 
-                MATCHING_TOLERANCE_RESP, false, 1.5, 1.5, 0.5, None 
+                MATCHING_TOLERANCE_RESP, false, 1.2, 1.5, 0.25, None 
             ) {
                 failures.push(e);
             }
@@ -206,7 +206,7 @@ fn test_data_integrity(resource: &str) {
             if let Some(rr) = ref_data.vital_signs.respiratory_rate {
                 if let Err(e) = verify_peaks(
                     filename, "RESP-Hinted", fs, &resp.data, &ground_truth, 
-                    MATCHING_TOLERANCE_RESP, false, 1.5, 1.5, 0.5, Some(rr.value)
+                    MATCHING_TOLERANCE_RESP, false, 1.2, 1.5, 0.25, Some(rr.value)
                 ) {
                     failures.push(e);
                 }

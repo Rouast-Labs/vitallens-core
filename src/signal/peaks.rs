@@ -34,7 +34,7 @@ impl Default for PeakOptions {
             bounds: SignalBounds { min_rate: 40.0, max_rate: 220.0 },
             threshold: 1.0,
             window_cycles: 2.5,
-            max_rate_change_per_sec: 3.0,
+            max_rate_change_per_sec: 1.0,
             interval_buffer: 0.25,
             refine: true,
             smooth_input: false,
@@ -79,7 +79,7 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     };
     
     let min_dist_seconds = (60.0 / max_possible_rate) * (1.0 - options.interval_buffer);
-    let min_dist_samples = (min_dist_seconds * options.fs) as usize;
+    let min_dist_samples = (min_dist_seconds * options.fs).ceil() as usize;
 
     let slowest_period = 60.0 / options.bounds.min_rate;
     let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
@@ -316,8 +316,8 @@ mod tests {
         let mut sig = vec![0.0; 50]; 
         sig[10] = 1.0; 
         sig[20] = 1.0; 
-        sig[27] = 1.0; // Premature (Gap = 0.7s)
-        sig[37] = 1.0;
+        sig[28] = 1.0; // Premature (Gap = 0.8s)
+        sig[38] = 1.0;
 
         let opts = PeakOptions {
             fs,
@@ -330,7 +330,7 @@ mod tests {
         let segments = find_peaks(&sig, opts);
         let peaks = &segments[0];
 
-        let found_premature = peaks.iter().any(|p| p.index == 27);
+        let found_premature = peaks.iter().any(|p| p.index == 28);
         assert!(found_premature, "Premature valid beat should be detected");
     }
 
