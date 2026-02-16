@@ -61,16 +61,16 @@ fn verify_rate(
         return Ok(());
     }
 
-    // 2. Configure Strategy based on Registry
-    // The registry stores the preferred calculation method (e.g. Periodogram vs PeakDetection)
-    let (calculated_rate, method_name) = match deriv.method {
+    // --- LOGIC EXTRACTION ---
+    // We match on the method to run the correct estimation
+    let (calculated_rate, calculated_conf, method_name) = match deriv.method {
         registry::CalculationMethod::Rate(strategy) => {
             let bounds = rate::RateBounds { 
                 min: deriv.min_value, 
                 max: deriv.max_value 
             };
             
-            // Note: For Periodogram, we pass None for scratch to keep test simple (it allocates internally)
+            // Execute
             let result = rate::estimate_rate(
                 signal, 
                 fs, 
@@ -79,18 +79,26 @@ fn verify_rate(
                 rate_hint, 
                 None 
             );
-            (result.value, result.method)
+            (result.value, result.confidence, result.method)
         },
         _ => panic!("Vital '{}' is not configured as a Rate calculation in registry", vital_id)
     };
 
-    // TODO: Assert conf in 0 to 1
+    // --- VERIFICATION ---
 
-    // 3. Assert
+    // 1. Check Confidence Bounds [0.0, 1.0]
+    if calculated_conf < 0.0 || calculated_conf > 1.0 {
+        return Err(format!(
+            "[{}] {} Confidence Out of Bounds. Got {:.4}, Expected [0.0, 1.0]",
+            filename, vital_id, calculated_conf
+        ));
+    }
+
+    // 2. Check Rate Accuracy
     let diff = (calculated_rate - ground_truth_rate).abs();
     
-    println!("[{}] {}: Method={}, Calc={:.1}bpm, Ref={:.1}bpm, Diff={:.1}bpm", 
-        filename, vital_id, method_name, calculated_rate, ground_truth_rate, diff);
+    println!("[{}] {}: Method={}, Calc={:.1}bpm (Conf {:.2}), Ref={:.1}bpm, Diff={:.1}bpm", 
+        filename, vital_id, method_name, calculated_rate, calculated_conf, ground_truth_rate, diff);
 
     if diff <= RATE_TOLERANCE_BPM {
         Ok(())
