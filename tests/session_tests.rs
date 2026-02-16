@@ -163,6 +163,8 @@ fn test_session_end_to_end(resource: &str) {
         }
     }
 
+    // TODO: Assert confs
+
     if !failures.is_empty() {
         panic!("Session E2E Failed:\n{}", failures.join("\n"));
     }

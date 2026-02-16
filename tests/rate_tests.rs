@@ -84,6 +84,8 @@ fn verify_rate(
         _ => panic!("Vital '{}' is not configured as a Rate calculation in registry", vital_id)
     };
 
+    // TODO: Assert conf in 0 to 1
+
     // 3. Assert
     let diff = (calculated_rate - ground_truth_rate).abs();
     

@@ -50,6 +50,7 @@ pub fn moving_average(signal: &[f32], window_size: usize) -> Vec<f32> {
 /// * `fs` - Sampling frequency
 /// * `cutoff_hz` - Desired cutoff frequency
 /// * `force_odd` - If true, ensures the result is odd (floors even numbers, e.g., 4 -> 3)
+// TODO: Test (from prpy)
 pub fn estimate_moving_average_window(fs: f32, cutoff_hz: f32, force_odd: bool) -> usize {
     if fs <= 0.0 || cutoff_hz <= 0.0 {
         return 1;
@@ -73,6 +74,8 @@ pub fn estimate_moving_average_window(fs: f32, cutoff_hz: f32, force_odd: bool) 
 
 /// Removes low-frequency trends by subtracting a moving average.
 /// This is a high-pass filter equivalent suitable for rPPG.
+// TODO: Proper implementation (from prpy)
+// TODO: Test (from prpy)
 pub fn detrend(signal: &[f32], fs: f32) -> Vec<f32> {
     // Standard window for rPPG detrending is roughly 1.0 second (fs frames)
     let window_size = fs.ceil() as usize; 
@@ -88,6 +91,8 @@ pub fn detrend(signal: &[f32], fs: f32) -> Vec<f32> {
 /// Z-Score normalization (Zero Mean, Unit Variance).
 /// Robust to outliers? No, standard Z-score. 
 /// Vital for FFT to prevent spectral leakage from offsets.
+// TODO: Check implementation (from prpy)
+// TODO: Test (from prpy)
 pub fn standardize(signal: &[f32]) -> Vec<f32> {
     if signal.is_empty() {
         return Vec::new();

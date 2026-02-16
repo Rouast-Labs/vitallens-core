@@ -226,6 +226,8 @@ fn test_hrv_integrity(resource: &str) {
                 failures.push(e);
             }
         }
+
+        // TODO Assert confs
     }
 
     if !failures.is_empty() {

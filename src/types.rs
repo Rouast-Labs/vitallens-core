@@ -1,4 +1,3 @@
-// FILE: src/types.rs
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 

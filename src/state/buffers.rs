@@ -84,3 +84,5 @@ impl SignalBuffer {
         }
     }
 }
+
+// TODO: Tests

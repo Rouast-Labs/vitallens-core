@@ -1,5 +1,8 @@
 use crate::signal::peaks::{find_peaks, PeakOptions, SignalBounds};
 
+// TODO: Add ie ratio to jsons (manually verified)
+// TODO: ie ratio integration test
+
 pub fn calculate_ie_ratio(signal: &[f32], fs: f32, confidence: &[f32]) -> (f32, f32) {
     let opts = PeakOptions { 
         fs,
