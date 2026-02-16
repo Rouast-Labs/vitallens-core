@@ -13434,7 +13434,7 @@
     },
     "vital_signs": {
         "hrv_lfhf": {
-            "value": 0.77,
+            "value": 0.7,
             "unit": "unitless",
             "confidence": 0.9604,
             "note": "Global estimate of Heart Rate Variability (LF/HF) using vitallens-2.0, with confidence level."
@@ -13452,7 +13452,7 @@
             "note": "Global estimate of Heart Rate using vitallens-2.0, with confidence level."
         },
         "hrv_sdnn": {
-            "value": 76.0,
+            "value": 75.0,
             "unit": "ms",
             "confidence": 0.9604,
             "note": "Global estimate of Heart Rate Variability (SDNN) using vitallens-2.0, with confidence level."
@@ -21217,7 +21217,7 @@
             ]
         },
         "hrv_rmssd": {
-            "value": 106.85,
+            "value": 103.0,
             "unit": "ms",
             "confidence": 0.9604,
             "note": "Global estimate of Heart Rate Variability (RMSSD) using vitallens-2.0, with confidence level."

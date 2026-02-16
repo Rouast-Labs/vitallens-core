@@ -1818,13 +1818,13 @@
             "note": "Global estimate of Respiratory Rate using vitallens-2.0, with confidence level."
         },
         "hrv_rmssd": {
-            "value": 94.88,
+            "value": 96.0,
             "unit": "ms",
             "confidence": 0.9879,
             "note": "Global estimate of Heart Rate Variability (RMSSD) using vitallens-2.0, with confidence level."
         },
         "hrv_sdnn": {
-            "value": 89.89,
+            "value": 91.0,
             "unit": "ms",
             "confidence": 0.9879,
             "note": "Global estimate of Heart Rate Variability (SDNN) using vitallens-2.0, with confidence level."
@@ -5456,7 +5456,7 @@
             ]
         },
         "hrv_lfhf": {
-            "value": 3.58,
+            "value": 2.8,
             "unit": "unitless",
             "confidence": 0.9879,
             "note": "Global estimate of Heart Rate Variability (LF/HF) using vitallens-2.0, with confidence level."
