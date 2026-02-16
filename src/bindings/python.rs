@@ -17,7 +17,7 @@ pub fn register_functions(m: &PyModule) -> PyResult<()> {
 #[pyfunction]
 fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
-    let bounds = RateBounds { min: 40.0, max: 240.0 }; 
+    let bounds = RateBounds { min: 40.0, max: 220.0 }; 
     let strategy = RateStrategy::Periodogram { target_res_hz: 0.005 };
     
     let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
@@ -30,7 +30,7 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
 fn estimate_hrv_sdnn(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
     
-    let bounds = SignalBounds { min_rate: 40.0, max_rate: 240.0 };
+    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
     let rate_hint = None;
 
     let (val, conf) = signal::estimate_hrv(

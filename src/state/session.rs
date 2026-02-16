@@ -212,7 +212,7 @@ impl SessionCore {
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let ts_slice = &self.timestamps[start_idx..];
                                     let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
-                                    let bounds = SignalBounds { min_rate: 40.0, max_rate: 240.0 };
+                                    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
                                     crate::signal::hrv::estimate_hrv(
                                         data_slice,
                                         actual_fs,

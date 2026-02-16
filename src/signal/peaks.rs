@@ -33,7 +33,7 @@ impl Default for PeakOptions {
             avg_rate_hint: None,
             bounds: SignalBounds { min_rate: 40.0, max_rate: 220.0 },
             threshold: 1.0,
-            window_cycles: 3.0,
+            window_cycles: 2.5,
             max_rate_change_per_sec: 3.0,
             interval_buffer: 0.25,
             refine: true,
