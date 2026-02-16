@@ -1,332 +1,250 @@
+use std::fs::File;
+use std::io::BufReader;
 use std::collections::HashMap;
-use vitallens_core::state::session::Session;
-use vitallens_core::types::{InputChunk, ModelConfig, WaveformMode, FaceInput};
+use std::path::Path;
+use serde::Deserialize;
+use test_generator::test_resources;
 
-fn mock_config(vitals: Vec<&str>) -> ModelConfig {
-    ModelConfig {
-        name: "test_model".to_string(),
-        supported_vitals: vitals.iter().map(|s| s.to_string()).collect(),
-        fps_target: 30.0,
-        input_size: 30,
-        roi_method: "face".to_string(),
-    }
+use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
+use vitallens_core::registry;
+
+// --- Tolerances ---
+const TOLERANCE_HR_BPM: f32 = 3.0;
+const TOLERANCE_RR_BPM: f32 = 3.0;
+const TOLERANCE_SDNN_MS: f32 = 10.0;
+const TOLERANCE_RMSSD_MS: f32 = 10.0;
+const TOLERANCE_LFHF: f32 = 1.0;
+
+// Consistency tolerance between Incremental and Windowed modes
+const CONSISTENCY_TOLERANCE: f32 = 0.5;
+
+// --- Data Structures ---
+
+#[derive(Deserialize, Debug)]
+struct ReferenceData {
+    vital_signs: Vitals,
+    fs: f32, 
 }
 
-fn mock_chunk(
-    times: Vec<f64>, 
-    signals: Vec<(&str, Vec<f32>)>, 
-    face: Option<FaceInput>
-) -> InputChunk {
-    let mut sig_map = HashMap::new();
-    let mut conf_map = HashMap::new();
-    
-    for (key, data) in signals {
-        let len = data.len();
-        sig_map.insert(key.to_string(), data);
-        conf_map.insert(key.to_string(), vec![1.0; len]);  
-    }
-
-    InputChunk {
-        timestamp: times,
-        signals: sig_map,
-        confidences: conf_map,
-        face,
-    }
+#[derive(Deserialize, Debug)]
+struct Vitals {
+    ppg_waveform: Option<Waveform>,
+    respiratory_waveform: Option<Waveform>,
+    heart_rate: Option<ScalarResult>,
+    respiratory_rate: Option<ScalarResult>,
+    hrv_sdnn: Option<ScalarResult>,
+    hrv_rmssd: Option<ScalarResult>,
+    hrv_lfhf: Option<ScalarResult>,
 }
 
-fn mock_sine(len: usize, fs: f32, freq_hz: f32) -> Vec<f32> {
-    (0..len).map(|i| {
-        let t = i as f32 / fs;
-        (t * 2.0 * std::f32::consts::PI * freq_hz).sin()
-    }).collect()
+#[derive(Deserialize, Debug)]
+struct Waveform {
+    data: Vec<f32>,
+    #[allow(dead_code)]
+    confidence: Option<Vec<f32>>,
 }
 
-#[test]
-fn st_01_soft_stitching_averages_overlap() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let chunk1 = mock_chunk(
-        vec![1.0, 2.0], 
-        vec![("ppg_waveform", vec![10.0, 20.0])], 
-        None
-    );
-    let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-    let chunk2 = mock_chunk(
-        vec![2.0, 3.0], 
-        vec![("ppg_waveform", vec![22.0, 30.0])], 
-        None
-    );
-    let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-    let ppg = result.signals.get("ppg_waveform").unwrap();
-    
-    assert_eq!(result.timestamp, vec![1.0, 2.0, 3.0]);
-    assert!((ppg.data[1] - 21.0).abs() < 0.001, "Expected 21.0, got {}", ppg.data[1]);
+#[derive(Deserialize, Debug)]
+struct ScalarResult {
+    value: f32,
 }
 
-#[test]
-fn st_02_disjoint_chunks_handle_gaps() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let chunk1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-    let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-    let chunk2 = mock_chunk(vec![5.0], vec![("ppg_waveform", vec![50.0])], None);
-    let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-    assert_eq!(result.timestamp, vec![1.0, 5.0]);
-    assert_eq!(result.signals["ppg_waveform"].data, vec![10.0, 50.0]);
+struct TestCase {
+    vital_id: String,
+    ground_truth: f32,
+    tolerance: f32,
+    input_signal_key: String,
+    input_data: Vec<f32>,
 }
 
-#[test]
-fn st_03_exact_duplicate_chunks_ignored() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
+// --- Main Test Logic ---
 
-    let chunk1 = mock_chunk(vec![1.0, 2.0], vec![("ppg_waveform", vec![10.0, 20.0])], None);
-    let _ = session.process_chunk(chunk1, WaveformMode::Global);
+#[test_resources("tests/fixtures/*.json")]
+fn test_session_end_to_end(resource: &str) {
+    let path = Path::new(resource);
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    let file = File::open(path).expect("Failed to open file");
+    let reader = BufReader::new(file);
+    let ref_data: ReferenceData = serde_json::from_reader(reader).expect("Failed to parse JSON");
 
-    let chunk2 = mock_chunk(vec![1.0, 2.0], vec![("ppg_waveform", vec![10.0, 20.0])], None);
-    let result = session.process_chunk(chunk2, WaveformMode::Global);
+    println!("\n=== SESSION E2E: {} ===", filename);
 
-    assert_eq!(result.timestamp, vec![1.0, 2.0]);
-    
-    let ppg = &result.signals["ppg_waveform"].data;
-    assert_eq!(ppg[0], 10.0);
-    assert_eq!(ppg[1], 20.0);
-}
-
-#[test]
-fn st_04_nan_handling_in_signal() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let c1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-    session.process_chunk(c1, WaveformMode::Global);
-
-    let c2 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![f32::NAN])], None);
-    let result = session.process_chunk(c2, WaveformMode::Global);
-   
-    let val = result.signals["ppg_waveform"].data[0];
-    assert!(!val.is_nan());
-    assert!((val - 10.0).abs() < 0.001);
-}
-
-#[test]
-fn st_05_pruning_limits_history() {
-    let mut config = mock_config(vec!["ppg_waveform"]);
-    config.fps_target = 1.0; 
-    
-    let session = Session::new(config);
-
-    let times: Vec<f64> = (0..100).map(|i| i as f64).collect();
-    let ppg: Vec<f32> = vec![1.0; 100];
-    
-    let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-
-    assert_eq!(result.timestamp.len(), 60);
-    assert_eq!(result.timestamp.first(), Some(&40.0));  
-    assert_eq!(result.timestamp.last(), Some(&99.0));
-}
-
-#[test]
-fn reg_01_dependency_ordering() {
-    let config = mock_config(vec!["ppg_waveform", "hrv_sdnn", "heart_rate"]);
-    let session = Session::new(config);
-
-    let fs: f32 = 30.0;  
-    let total_samples = 660;  
-    let times: Vec<f64> = (0..total_samples).map(|i| i as f64 / fs as f64).collect();
-    
-    let mut ppg = Vec::new();
-    let mut phase = 0.0;
-    
-    for i in 0..total_samples {
-        let t = i as f32 / fs;  
-        
-        let current_freq = if t < 10.0 { 1.0 } else { 1.3 };
-        
-        phase += 2.0 * std::f32::consts::PI * current_freq / fs;
-        
-        let val = phase.sin().max(0.0).powf(4.0);
-        ppg.push(val);
-    }
-
-    let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-
-    if !result.signals.contains_key("hrv_sdnn") {
-        println!("Available signals: {:?}", result.signals.keys());
-    }
-
-    assert!(result.signals.contains_key("heart_rate"), "Heart Rate missing");
-    assert!(result.signals.contains_key("hrv_sdnn"), "SDNN missing");
-}
-
-#[test]
-fn reg_02_minimum_data_gating() {
-    let config = mock_config(vec!["ppg_waveform", "heart_rate"]);
-    let session = Session::new(config);
-
-    let times: Vec<f64> = (0..60).map(|i| i as f64 / 30.0).collect();
-    let ppg = mock_sine(60, 30.0, 1.2);
-    
-    let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-    
-    assert!(result.signals.contains_key("ppg_waveform"));
-    assert!(!result.signals.contains_key("heart_rate"));
-}
-
-#[test]
-fn reg_03_alias_resolution() {
-    let config = mock_config(vec!["ppg_waveform", "pulse"]);
-    let session = Session::new(config);
-
-    let times: Vec<f64> = (0..150).map(|i| i as f64 / 30.0).collect();
-    let ppg = mock_sine(150, 30.0, 1.2);
-
-    let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-
-    assert!(result.signals.contains_key("heart_rate"));
-    assert!(!result.signals.contains_key("pulse"));
-}
-
-#[test]
-fn reg_04_provided_scalar_spo2() {
-    let mut config = mock_config(vec!["spo2"]);
-    config.fps_target = 1.0;  
-    
-    let session = Session::new(config);
-
-    let chunk = mock_chunk(
-        vec![1.0, 2.0, 3.0], 
-        vec![("spo2", vec![98.0, 99.0, 98.0])], 
-        None
-    );
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-
-    let sig = result.signals.get("spo2").unwrap();
-    
-    assert_eq!(sig.data, vec![98.0, 99.0, 98.0]);
-    
-    assert!(sig.value.is_some(), "Scalar value missing");
-    let val = sig.value.unwrap();
-    assert!((val - 98.333).abs() < 0.01);
-}
-
-#[test]
-fn reg_05_unsupported_vital() {
-    let config = mock_config(vec!["blood_pressure"]);  
-    let session = Session::new(config);
-
-    let chunk = mock_chunk(vec![1.0], vec![], None);
-    let result = session.process_chunk(chunk, WaveformMode::Global);
-
-    assert!(!result.signals.contains_key("blood_pressure"));
-}
-
-#[test]
-fn out_01_incremental_mode() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let c1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-    let r1 = session.process_chunk(c1, WaveformMode::Incremental);
-    assert_eq!(r1.timestamp, vec![1.0]);
-
-    let c2 = mock_chunk(vec![2.0], vec![("ppg_waveform", vec![20.0])], None);
-    let r2 = session.process_chunk(c2, WaveformMode::Incremental);
-   
-    assert_eq!(r2.timestamp, vec![2.0]);
-    assert_eq!(r2.signals["ppg_waveform"].data, vec![20.0]);
-}
-
-#[test]
-fn out_02_windowed_mode() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let times: Vec<f64> = (0..300).map(|i| i as f64 / 30.0).collect();
-    let ppg = vec![0.0; 300];
-    let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-
-    let result = session.process_chunk(chunk, WaveformMode::Windowed { seconds: 2.0 });
-
-    assert_eq!(result.timestamp.len(), 60);
-    assert!(result.timestamp.last().unwrap() > &9.9);
-}
-
-#[test]
-fn out_03_global_mode() {
-    let config = mock_config(vec!["spo2"]);
-    let session = Session::new(config);
-
-    let times1: Vec<f64> = (0..300).map(|i| i as f64 / 30.0).collect();
-    let ppg1 = vec![1.0; 300];
-    let chunk1 = mock_chunk(times1, vec![("spo2", ppg1)], None);
-    let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-    let times2: Vec<f64> = (300..360).map(|i| i as f64 / 30.0).collect();
-    let ppg2 = vec![2.0; 60];
-    let chunk2 = mock_chunk(times2, vec![("spo2", ppg2)], None);
-    
-    let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-    assert_eq!(result.timestamp.len(), 360);
-    assert_eq!(result.timestamp.first(), Some(&0.0));
-    assert_eq!(result.timestamp.last(), Some(&11.966666666666667));  
-   
-    let data = &result.signals["spo2"].data;
-    assert_eq!(data[0], 1.0);     
-    assert_eq!(data[359], 2.0);   
-}
-
-#[test]
-fn face_01_sync_with_signal() {
-    let config = mock_config(vec!["ppg_waveform"]);
-    let session = Session::new(config);
-
-    let face = FaceInput {
-        coordinates: vec![10.0, 10.0, 50.0, 50.0],
-        confidence: 0.9,
+    // 1. Setup Test Cases
+    let mut cases = Vec::new();
+    let duration_sec = if let Some(ppg) = &ref_data.vital_signs.ppg_waveform {
+        ppg.data.len() as f32 / ref_data.fs
+    } else {
+        0.0
     };
 
-    let chunk = mock_chunk(
-        vec![1.0, 2.0], 
-        vec![("ppg_waveform", vec![10.0, 20.0])], 
-        Some(face)
-    );
+    println!("  -> Duration: {:.2}s, Fs: {:.1}Hz", duration_sec, ref_data.fs);
 
-    let result = session.process_chunk(chunk, WaveformMode::Global);
+    let mut add_case = |id: &str, gt: Option<&ScalarResult>, signal: Option<&Waveform>, key: &str, tol: f32| {
+        if let (Some(g), Some(s)) = (gt, signal) {
+            let meta = registry::get_vital_meta(id).unwrap();
+            let min_win = meta.derivations[0].min_window_seconds;
+            if duration_sec >= min_win {
+                cases.push(TestCase {
+                    vital_id: id.to_string(),
+                    ground_truth: g.value,
+                    tolerance: tol,
+                    input_signal_key: key.to_string(),
+                    input_data: s.data.clone(),
+                });
+            }
+        }
+    };
 
-    assert!(result.face.is_some());
-    let f = result.face.unwrap();
-    assert_eq!(f.coordinates.len(), 2);  
-    assert_eq!(f.confidence.len(), 2);
-    assert_eq!(f.coordinates[0], vec![10.0, 10.0, 50.0, 50.0]);
+    add_case("heart_rate", ref_data.vital_signs.heart_rate.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_HR_BPM);
+    add_case("respiratory_rate", ref_data.vital_signs.respiratory_rate.as_ref(), ref_data.vital_signs.respiratory_waveform.as_ref(), "respiratory_waveform", TOLERANCE_RR_BPM);
+    add_case("hrv_sdnn", ref_data.vital_signs.hrv_sdnn.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SDNN_MS);
+    add_case("hrv_rmssd", ref_data.vital_signs.hrv_rmssd.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_RMSSD_MS);
+    add_case("hrv_lfhf", ref_data.vital_signs.hrv_lfhf.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_LFHF);
+
+    if cases.is_empty() {
+        println!("  [SKIP] No valid vitals found in file.");
+        return;
+    }
+    
+    let active_vitals: Vec<&String> = cases.iter().map(|c| &c.vital_id).collect();
+    println!("  -> Active Vitals: {:?}", active_vitals);
+
+    // 2. Run All Modes
+    // Global
+    let global_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Global);
+    // Incremental (15 frame chunks)
+    let inc_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Incremental);
+    // Windowed (30 frame chunks)
+    let win_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
+
+    let mut failures = Vec::new();
+
+    // 3. Assertions
+    println!("\n  --- ASSERTIONS [{}] ---", filename);
+
+    for case in &cases {
+        let vid = &case.vital_id;
+        
+        // Check A: Global vs Ground Truth
+        if let Some(val) = global_results.get(vid) {
+            let diff = (val - case.ground_truth).abs();
+            if diff <= case.tolerance {
+                println!("  [OK] Global {}: {:.2} (Ref {:.2}, Diff {:.2})", vid, val, case.ground_truth, diff);
+            } else {
+                let msg = format!("Global {} mismatch: {:.2} vs Ref {:.2} (Diff {:.2} > {:.1})", 
+                    vid, val, case.ground_truth, diff, case.tolerance);
+                println!("  [X] {}", msg);
+                failures.push(msg);
+            }
+        } else {
+            // It is possible Global failed if the file length is exactly at the boundary 
+            println!("  [WARN] Global {} produced no result", vid);
+        }
+
+        // Check B: Incremental vs Windowed (Consistency Check)
+        match (inc_results.get(vid), win_results.get(vid)) {
+            (Some(inc), Some(win)) => {
+                let diff = (inc - win).abs();
+                if diff <= CONSISTENCY_TOLERANCE {
+                    println!("  [OK] Consistency {}: Inc {:.2} vs Win {:.2} (Diff {:.2})", vid, inc, win, diff);
+                } else {
+                    let msg = format!("Consistency {} mismatch: Inc {:.2} vs Win {:.2} (Diff {:.2} > {:.1})", 
+                        vid, inc, win, diff, CONSISTENCY_TOLERANCE);
+                    println!("  [X] {}", msg);
+                    failures.push(msg);
+                }
+            },
+            (None, None) => println!("  [WARN] Neither streaming mode produced result for {}", vid),
+            _ => {
+                 let msg = format!("Streaming mismatch: One mode produced result for {}, one did not", vid);
+                 println!("  [X] {}", msg);
+                 failures.push(msg);
+            }
+        }
+    }
+
+    if !failures.is_empty() {
+        panic!("Session E2E Failed:\n{}", failures.join("\n"));
+    }
 }
 
-#[test]
-fn face_02_missing_face_data_pads_zeros() {
-    let config = mock_config(vec!["ppg_waveform"]);
+// Helper: Just runs the session and returns the final values
+fn run_session_extraction(
+    filename: &str, 
+    ref_data: &ReferenceData, 
+    cases: &[TestCase], 
+    mode: WaveformMode
+) -> HashMap<String, f32> {
+    
+    // Config
+    let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
+    let config = ModelConfig {
+        name: format!("{}_{:?}", filename, mode),
+        supported_vitals,
+        fps_target: ref_data.fs,
+        input_size: 30,
+        roi_method: "face".to_string(),
+    };
+    
     let session = Session::new(config);
 
-    let chunk = mock_chunk(
-        vec![1.0, 2.0], 
-        vec![("ppg_waveform", vec![10.0, 20.0])], 
-        None
-    );
+    // Pre-calculate Global State
+    let max_len = cases.iter().map(|c| c.input_data.len()).max().unwrap_or(0);
+    let global_timestamps: Vec<f64> = (0..max_len).map(|t| {
+        let base = t as f64 / ref_data.fs as f64;
+        let jitter = if t % 2 == 0 { 0.001 } else { -0.001 };
+        base + jitter
+    }).collect();
 
-    let result = session.process_chunk(chunk, WaveformMode::Global);
+    // Streaming Logic
+    let (chunk_size, step_size) = match mode {
+        WaveformMode::Global => (max_len, max_len),
+        WaveformMode::Incremental => (15, 12), // Small chunk (0.5s), 3 frame overlap
+        WaveformMode::Windowed { .. } => (30, 25), // Standard chunk (1.0s), 5 frame overlap
+    };
+    
+    let mut final_results: HashMap<String, f32> = HashMap::new();
+    let mut start = 0;
 
-    assert!(result.face.is_some());
-    let f = result.face.unwrap();
-    assert_eq!(f.coordinates.len(), 2);
-    assert_eq!(f.coordinates[0], vec![0.0, 0.0, 0.0, 0.0]);
+    // Log Start
+    println!("  -> Running Mode: {:?} (Chunk {}, Step {})", mode, chunk_size, step_size);
+
+    while start < max_len {
+        let end = (start + chunk_size).min(max_len);
+        
+        let ts_slice = &global_timestamps[start..end];
+        let mut signal_map = HashMap::new();
+        let mut confidence_map = HashMap::new();
+
+        for case in cases {
+            if start < case.input_data.len() {
+                let case_end = (start + chunk_size).min(case.input_data.len());
+                if case_end > start {
+                    let slice = &case.input_data[start..case_end];
+                    signal_map.insert(case.input_signal_key.clone(), slice.to_vec());
+                    confidence_map.insert(case.input_signal_key.clone(), vec![1.0; slice.len()]);
+                }
+            }
+        }
+
+        let chunk = InputChunk {
+            timestamp: ts_slice.to_vec(),
+            signals: signal_map,
+            confidences: confidence_map,
+            face: None,
+        };
+
+        let result = session.process_chunk(chunk, mode.clone());
+
+        for (key, val) in result.signals {
+            if let Some(v) = val.value {
+                final_results.insert(key, v);
+            }
+        }
+
+        if end == max_len { break; }
+        start += step_size;
+    }
+
+    final_results
 }

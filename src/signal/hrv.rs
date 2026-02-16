@@ -1,5 +1,4 @@
 use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks};
-use crate::registry::HrvMetric;
 
 #[derive(Debug, Clone, Copy)]
 pub struct HrvOptions {

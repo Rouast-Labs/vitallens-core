@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::Deserialize;
 use test_generator::test_resources;
 
-use vitallens_core::signal::{peaks, rate};
+use vitallens_core::signal::rate;
 use vitallens_core::registry;
 
 // Tolerance for Rate metrics (BPM)
