@@ -73,13 +73,18 @@ fn verify_sdnn(
         max_rate: deriv_hr.max_value 
     };
 
-    let (calculated, _) = hrv::estimate_hrv(
+    let (calculated, calc_conf) = hrv::estimate_hrv(
         signal, fs, HrvMetric::Sdnn, &timestamps, &confidence, bounds, rate_hint
     );
 
     let diff = (calculated - ground_truth_sdnn).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
     
-    println!("[{}] SDNN: Calc={:.2}ms, Ref={:.2}ms, Diff={:.2}ms", filename, calculated, ground_truth_sdnn, diff);
+    println!("[{}] SDNN: Calc={:.2}ms (Conf {:.2}), Ref={:.2}ms, Diff={:.2}ms", filename, calculated, calc_conf, ground_truth_sdnn, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] SDNN Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
 
     if diff <= SDNN_TOLERANCE_MS {
         Ok(())
@@ -119,13 +124,18 @@ fn verify_rmssd(
         max_rate: deriv_hr.max_value 
     };
 
-    let (calculated, _) = hrv::estimate_hrv(
+    let (calculated, calc_conf) = hrv::estimate_hrv(
         signal, fs, HrvMetric::Rmssd, &timestamps, &confidence, bounds, rate_hint
     );
 
     let diff = (calculated - ground_truth_rmssd).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
     
-    println!("[{}] RMSSD: Calc={:.2}ms, Ref={:.2}ms, Diff={:.2}ms", filename, calculated, ground_truth_rmssd, diff);
+    println!("[{}] RMSSD: Calc={:.2}ms (Conf {:.2}), Ref={:.2}ms, Diff={:.2}ms", filename, calculated, calc_conf, ground_truth_rmssd, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] RMSSD Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
 
     if diff <= RMSSD_TOLERANCE_MS {
         Ok(())
@@ -165,13 +175,18 @@ fn verify_lfhf(
         max_rate: deriv_hr.max_value 
     };
 
-    let (calculated, _) = hrv::estimate_hrv(
+    let (calculated, calc_conf) = hrv::estimate_hrv(
         signal, fs, HrvMetric::LfHf, &timestamps, &confidence, bounds, rate_hint
     );
 
     let diff = (calculated - ground_truth_lfhf).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
     
-    println!("[{}] LF/HF: Calc={:.2}, Ref={:.2}, Diff={:.2}", filename, calculated, ground_truth_lfhf, diff);
+    println!("[{}] LF/HF: Calc={:.2} (Conf {:.2}), Ref={:.2}, Diff={:.2}", filename, calculated, calc_conf, ground_truth_lfhf, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] LF/HF Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
 
     if diff <= LFHF_TOLERANCE {
         Ok(())
@@ -226,8 +241,6 @@ fn test_hrv_integrity(resource: &str) {
                 failures.push(e);
             }
         }
-
-        // TODO Assert confs
     }
 
     if !failures.is_empty() {
