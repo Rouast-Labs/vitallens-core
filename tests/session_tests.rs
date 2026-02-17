@@ -235,6 +235,8 @@ fn run_session_extraction(
     while start < max_len {
         let end = (start + chunk_size).min(max_len);
         
+        let unique_frames_sent = if start == 0 { end } else { end - (start + chunk_size - step_size) };
+        
         let ts_slice = &global_timestamps[start..end];
         let mut signal_map = HashMap::new();
         let mut confidence_map = HashMap::new();
@@ -271,6 +273,21 @@ fn run_session_extraction(
             };
 
             if matches!(mode, WaveformMode::Incremental) {
+                if !val.data.is_empty() {
+                    assert_eq!(
+                        val.data.len(), 
+                        unique_frames_sent, 
+                        "Incremental mode for {} returned {} frames, expected {} (unique frames sent)", 
+                        key, val.data.len(), unique_frames_sent
+                    );
+                    
+                    assert_eq!(
+                        val.confidence.len(),
+                        unique_frames_sent,
+                        "Incremental mode for {} returned {} confidence scores, expected {}",
+                        key, val.confidence.len(), unique_frames_sent
+                    );
+                }
                 entry.0.extend(val.data);
                 entry.1.extend(val.confidence);
             } else {
