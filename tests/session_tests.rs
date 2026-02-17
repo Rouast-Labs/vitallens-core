@@ -56,7 +56,7 @@ struct TestCase {
 }
 
 #[test_resources("tests/fixtures/*.json")]
-fn test_session_end_to_end(resource: &str) {
+fn test_session(resource: &str) {
     let path = Path::new(resource);
     let filename = path.file_name().unwrap().to_str().unwrap();
     let file = File::open(path).expect("Failed to open file");
@@ -108,9 +108,9 @@ fn test_session_end_to_end(resource: &str) {
     let active_vitals: Vec<&String> = cases.iter().map(|c| &c.vital_id).collect();
     println!(" -> Active Vitals: {:?}", active_vitals);
 
-    let global_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Global);
-    let inc_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Incremental);
-    let win_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
+    let (global_results, global_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Global);
+    let (inc_results, inc_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Incremental);
+    let (win_results, win_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
 
     let mut failures = Vec::new();
 
@@ -118,6 +118,28 @@ fn test_session_end_to_end(resource: &str) {
 
     for case in &cases {
         let vid = &case.vital_id;
+
+        let wave_key = &case.input_signal_key;
+
+        // --- GLOBAL Length Checks ---
+        if let Some((data, conf)) = global_waves.get(wave_key) {
+            let expected = case.input_data.len();
+            assert_eq!(data.len(), expected, "GLOBAL Waveform {} data length mismatch", wave_key);
+            assert_eq!(conf.len(), expected, "GLOBAL Waveform {} confidence length mismatch", wave_key);
+        }
+
+        // --- INCREMENTAL Length Checks ---
+        if let Some((data, conf)) = inc_waves.get(wave_key) {
+             assert_eq!(data.len(), case.input_data.len(), "INCREMENTAL total entries mismatch for {}", wave_key);
+        }
+
+        // --- WINDOWED Length Checks ---
+        if let Some((data, conf)) = win_waves.get(wave_key) {
+            let window_frames = (30.0 * ref_data.fs) as usize;
+            let expected_len = window_frames.min(case.input_data.len());
+            
+            assert!(data.len() >= expected_len, "WINDOWED entries for {} insufficient", wave_key);
+        }
         
         if let Some((val, conf)) = global_results.get(vid) {
             let val_diff = (val - case.ground_truth).abs();
@@ -178,7 +200,7 @@ fn run_session_extraction(
     ref_data: &ReferenceData, 
     cases: &[TestCase], 
     mode: WaveformMode
-) -> HashMap<String, (f32, f32)> {
+) -> (HashMap<String, (f32, f32)>, HashMap<String, (Vec<f32>, Vec<f32>)>) {
     
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = ModelConfig {
@@ -205,6 +227,7 @@ fn run_session_extraction(
     };
     
     let mut final_results: HashMap<String, (f32, f32)> = HashMap::new();
+    let mut waveform_results: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
     let mut start = 0;
 
     println!(" -> Running Mode: {:?} (Chunk {}, Step {})", mode, chunk_size, step_size);
@@ -220,11 +243,9 @@ fn run_session_extraction(
             if start < case.input_data.len() {
                 let case_end = (start + chunk_size).min(case.input_data.len());
                 if case_end > start {
-                    // SLICE THE DATA
                     let slice_data = &case.input_data[start..case_end];
                     signal_map.insert(case.input_signal_key.clone(), slice_data.to_vec());
 
-                    // SLICE THE CONFIDENCE
                     let slice_conf = &case.input_confidence[start..case_end];
                     confidence_map.insert(case.input_signal_key.clone(), slice_conf.to_vec());
                 }
@@ -241,13 +262,24 @@ fn run_session_extraction(
         let result = session.process_chunk(chunk, mode.clone());
 
         for (key, val) in result.signals {
+            let entry = waveform_results.entry(key.clone()).or_insert((Vec::new(), Vec::new()));
+            
+            let avg_conf = if !val.confidence.is_empty() {
+                val.confidence.iter().sum::<f32>() / val.confidence.len() as f32
+            } else {
+                0.0
+            };
+
+            if matches!(mode, WaveformMode::Incremental) {
+                entry.0.extend(val.data);
+                entry.1.extend(val.confidence);
+            } else {
+                entry.0 = val.data;
+                entry.1 = val.confidence;
+            }
+
             if let Some(v) = val.value {
-                let conf = if !val.confidence.is_empty() {
-                    val.confidence.iter().sum::<f32>() / val.confidence.len() as f32
-                } else {
-                    0.0
-                };
-                final_results.insert(key, (v, conf));
+                final_results.insert(key, (v, avg_conf));
             }
         }
 
@@ -255,5 +287,5 @@ fn run_session_extraction(
         start += step_size;
     }
 
-    final_results
+    (final_results, waveform_results)
 }
