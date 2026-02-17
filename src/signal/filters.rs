@@ -1,19 +1,41 @@
 use std::f32;
 
+const DEFAULT_HP_CUTOFF: f32 = 0.5;
+const DEFAULT_LP_CUTOFF: f32 = 3.0;
+
 pub fn apply_processing(
     signal: &[f32], 
     op: crate::registry::PostProcessOp,
     fs: f32,
     min_freq: Option<f32>,
-    _max_freq: Option<f32>,
+    max_freq: Option<f32>,
 ) -> Vec<f32> {
     match op {
+        crate::registry::PostProcessOp::None => signal.to_vec(),
         crate::registry::PostProcessOp::Detrend => {
-            let cutoff = min_freq.unwrap_or(0.0);
+            let cutoff = min_freq.unwrap_or(DEFAULT_HP_CUTOFF);
             detrend(signal, fs, cutoff)
         },
+        crate::registry::PostProcessOp::MovingAverage => {
+            let cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
+            let window = estimate_moving_average_window(fs, cutoff, true);
+            moving_average(signal, window)
+        },
         crate::registry::PostProcessOp::Standardize => standardize(signal),
-        crate::registry::PostProcessOp::None => signal.to_vec(),
+        crate::registry::PostProcessOp::MovingAverageStandardize => {
+            let cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
+            let window = estimate_moving_average_window(fs, cutoff, true);
+            let smoothed = moving_average(signal, window);
+            standardize(&smoothed)
+        },
+        crate::registry::PostProcessOp::DetrendMovingAverageStandardize => {
+            let hp_cutoff = min_freq.unwrap_or(DEFAULT_HP_CUTOFF);
+            let detrended = detrend(signal, fs, hp_cutoff);
+            let lp_cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
+            let window = estimate_moving_average_window(fs, lp_cutoff, true);
+            let smoothed = moving_average(&detrended, window);
+            standardize(&smoothed)
+        },
     }
 }
 
@@ -223,6 +245,7 @@ pub fn standardize(signal: &[f32]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::registry::PostProcessOp;
 
     #[test]
     fn test_ma_impulse_response() {
@@ -435,5 +458,46 @@ mod tests {
         let data = vec![1.0, 1.0000001, 1.0];
         let res = standardize(&data);
         assert_eq!(res, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_pipeline_detrend_ma_std() {
+        let fs = 30.0;
+        let mut signal = Vec::new();
+        for i in 0..100 {
+            let t = i as f32 / fs;
+            // Signal: 
+            // 1. Drift: 2.0*t
+            // 2. Pulse: Sine at 1Hz (within 0.5-3.0 range)
+            // 3. HF Noise: Sine at 10Hz (should be removed by MA)
+            let val = 2.0*t + (2.0 * std::f32::consts::PI * 1.0 * t).sin() + 0.5 * (2.0 * std::f32::consts::PI * 10.0 * t).sin();
+            signal.push(val);
+        }
+
+        let processed = apply_processing(
+            &signal, 
+            PostProcessOp::DetrendMovingAverageStandardize, 
+            fs, 
+            Some(0.5), // HP Cutoff
+            Some(2.0)  // LP Cutoff (Aggressive, remove > 2Hz)
+        );
+
+        // Check 1: Standardization
+        let mean = processed.iter().sum::<f32>() / processed.len() as f32;
+        let variance = processed.iter().map(|x| x*x).sum::<f32>() / processed.len() as f32;
+        assert!(mean.abs() < 1e-5, "Mean not zero");
+        assert!((variance - 1.0).abs() < 1e-5, "Variance not one");
+
+        // Check 2: Noise Removal (Rough check)
+        // The original signal had jagged edges due to 10Hz noise. 
+        // The processed signal should be smoother (dominated by 1Hz).
+        // We can check zero crossings. 1Hz signal over 3.3s (100 samples) should have ~6-7 crossings.
+        // 10Hz noise would create many more.
+        let crossings = processed.windows(2)
+            .filter(|w| w[0].signum() != w[1].signum())
+            .count();
+        
+        // 100 samples / 30fps = 3.33s. 1Hz = 3.3 cycles. 2 crossings per cycle = ~7 crossings.
+        assert!(crossings >= 4 && crossings <= 10, "Expected ~6 crossings for 1Hz, got {}", crossings);
     }
 }

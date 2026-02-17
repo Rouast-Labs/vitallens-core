@@ -40,7 +40,10 @@ pub enum CalculationMethod {
 pub enum PostProcessOp {
     None,
     Detrend,
+    MovingAverage,
     Standardize,
+    MovingAverageStandardize,
+    DetrendMovingAverageStandardize,
 }
 
 #[derive(Debug, Clone)]
