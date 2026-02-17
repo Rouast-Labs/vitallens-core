@@ -8,17 +8,13 @@ use test_generator::test_resources;
 use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
 use vitallens_core::registry;
 
-// --- Tolerances ---
 const TOLERANCE_HR_BPM: f32 = 3.0;
 const TOLERANCE_RR_BPM: f32 = 3.0;
 const TOLERANCE_SDNN_MS: f32 = 10.0;
 const TOLERANCE_RMSSD_MS: f32 = 10.0;
 const TOLERANCE_LFHF: f32 = 1.0;
 
-// Consistency tolerance between Incremental and Windowed modes
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
-
-// --- Data Structures ---
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
@@ -40,24 +36,24 @@ struct Vitals {
 #[derive(Deserialize, Debug)]
 struct Waveform {
     data: Vec<f32>,
-    #[allow(dead_code)]
     confidence: Option<Vec<f32>>,
 }
 
 #[derive(Deserialize, Debug)]
 struct ScalarResult {
     value: f32,
+    confidence: f32,
 }
 
 struct TestCase {
     vital_id: String,
     ground_truth: f32,
+    gt_confidence: f32,
     tolerance: f32,
     input_signal_key: String,
     input_data: Vec<f32>,
+    input_confidence: Vec<f32>,
 }
-
-// --- Main Test Logic ---
 
 #[test_resources("tests/fixtures/*.json")]
 fn test_session_end_to_end(resource: &str) {
@@ -69,7 +65,6 @@ fn test_session_end_to_end(resource: &str) {
 
     println!("\n=== SESSION E2E: {} ===", filename);
 
-    // 1. Setup Test Cases
     let mut cases = Vec::new();
     let duration_sec = if let Some(ppg) = &ref_data.vital_signs.ppg_waveform {
         ppg.data.len() as f32 / ref_data.fs
@@ -77,19 +72,23 @@ fn test_session_end_to_end(resource: &str) {
         0.0
     };
 
-    println!("  -> Duration: {:.2}s, Fs: {:.1}Hz", duration_sec, ref_data.fs);
+    println!(" -> Duration: {:.2}s, Fs: {:.1}Hz", duration_sec, ref_data.fs);
 
     let mut add_case = |id: &str, gt: Option<&ScalarResult>, signal: Option<&Waveform>, key: &str, tol: f32| {
         if let (Some(g), Some(s)) = (gt, signal) {
             let meta = registry::get_vital_meta(id).unwrap();
             let min_win = meta.derivations[0].min_window_seconds;
             if duration_sec >= min_win {
+                let real_conf = s.confidence.clone().unwrap_or_else(|| vec![1.0; s.data.len()]);
+
                 cases.push(TestCase {
                     vital_id: id.to_string(),
                     ground_truth: g.value,
+                    gt_confidence: g.confidence,
                     tolerance: tol,
                     input_signal_key: key.to_string(),
                     input_data: s.data.clone(),
+                    input_confidence: real_conf,
                 });
             }
         }
@@ -102,83 +101,85 @@ fn test_session_end_to_end(resource: &str) {
     add_case("hrv_lfhf", ref_data.vital_signs.hrv_lfhf.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_LFHF);
 
     if cases.is_empty() {
-        println!("  [SKIP] No valid vitals found in file.");
+        println!(" [SKIP] No valid vitals found in file.");
         return;
     }
     
     let active_vitals: Vec<&String> = cases.iter().map(|c| &c.vital_id).collect();
-    println!("  -> Active Vitals: {:?}", active_vitals);
+    println!(" -> Active Vitals: {:?}", active_vitals);
 
-    // 2. Run All Modes
-    // Global
     let global_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Global);
-    // Incremental (15 frame chunks)
     let inc_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Incremental);
-    // Windowed (30 frame chunks)
     let win_results = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
 
     let mut failures = Vec::new();
 
-    // 3. Assertions
-    println!("\n  --- ASSERTIONS [{}] ---", filename);
+    println!("\n --- ASSERTIONS [{}] ---", filename);
 
     for case in &cases {
         let vid = &case.vital_id;
         
-        // Check A: Global vs Ground Truth
-        if let Some(val) = global_results.get(vid) {
-            let diff = (val - case.ground_truth).abs();
-            if diff <= case.tolerance {
-                println!("  [OK] Global {}: {:.2} (Ref {:.2}, Diff {:.2})", vid, val, case.ground_truth, diff);
+        if let Some((val, conf)) = global_results.get(vid) {
+            let val_diff = (val - case.ground_truth).abs();
+            let conf_diff = (conf - case.gt_confidence).abs();
+            
+            if val_diff <= case.tolerance {
+                println!(" [OK] Global {}: Val {:.2} (Ref {:.2})", vid, val, case.ground_truth);
             } else {
-                let msg = format!("Global {} mismatch: {:.2} vs Ref {:.2} (Diff {:.2} > {:.1})", 
-                    vid, val, case.ground_truth, diff, case.tolerance);
-                println!("  [X] {}", msg);
+                let msg = format!("Global {} Value Mismatch: {:.2} vs Ref {:.2} (Diff {:.2})", 
+                    vid, val, case.ground_truth, val_diff);
+                println!(" [X] {}", msg);
                 failures.push(msg);
             }
+
+            if conf_diff <= 0.01 { 
+                 println!(" [OK] Global {} Conf: {:.2} (Ref {:.2})", vid, conf, case.gt_confidence);
+            } else {
+                 let msg = format!("Global {} Conf Mismatch: {:.2} vs Ref {:.2} (Diff {:.2})", 
+                    vid, conf, case.gt_confidence, conf_diff);
+                 println!(" [X] {}", msg);
+                 failures.push(msg);
+            }
+
         } else {
-            // It is possible Global failed if the file length is exactly at the boundary 
-            println!("  [WARN] Global {} produced no result", vid);
+            println!(" [WARN] Global {} produced no result", vid);
         }
 
-        // Check B: Incremental vs Windowed (Consistency Check)
         match (inc_results.get(vid), win_results.get(vid)) {
-            (Some(inc), Some(win)) => {
-                let diff = (inc - win).abs();
-                if diff <= CONSISTENCY_TOLERANCE {
-                    println!("  [OK] Consistency {}: Inc {:.2} vs Win {:.2} (Diff {:.2})", vid, inc, win, diff);
+            (Some((inc_val, inc_conf)), Some((win_val, win_conf))) => {
+                let val_diff = (inc_val - win_val).abs();
+                let conf_diff = (inc_conf - win_conf).abs();
+
+                if val_diff <= CONSISTENCY_TOLERANCE && conf_diff <= CONSISTENCY_TOLERANCE {
+                    println!(" [OK] Consistency {}: Match (Val Diff {:.2}, Conf Diff {:.2})", vid, val_diff, conf_diff);
                 } else {
-                    let msg = format!("Consistency {} mismatch: Inc {:.2} vs Win {:.2} (Diff {:.2} > {:.1})", 
-                        vid, inc, win, diff, CONSISTENCY_TOLERANCE);
-                    println!("  [X] {}", msg);
+                    let msg = format!("Consistency {} mismatch: ValDiff {:.2}, ConfDiff {:.2}", 
+                        vid, val_diff, conf_diff);
+                    println!(" [X] {}", msg);
                     failures.push(msg);
                 }
             },
-            (None, None) => println!("  [WARN] Neither streaming mode produced result for {}", vid),
+            (None, None) => println!(" [WARN] Neither streaming mode produced result for {}", vid),
             _ => {
                  let msg = format!("Streaming mismatch: One mode produced result for {}, one did not", vid);
-                 println!("  [X] {}", msg);
+                 println!(" [X] {}", msg);
                  failures.push(msg);
             }
         }
     }
-
-    // TODO: Assert confs
 
     if !failures.is_empty() {
         panic!("Session E2E Failed:\n{}", failures.join("\n"));
     }
 }
 
-// Helper: Just runs the session and returns the final values
 fn run_session_extraction(
     filename: &str, 
     ref_data: &ReferenceData, 
     cases: &[TestCase], 
     mode: WaveformMode
-) -> HashMap<String, f32> {
+) -> HashMap<String, (f32, f32)> {
     
-    // Config
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = ModelConfig {
         name: format!("{}_{:?}", filename, mode),
@@ -190,7 +191,6 @@ fn run_session_extraction(
     
     let session = Session::new(config);
 
-    // Pre-calculate Global State
     let max_len = cases.iter().map(|c| c.input_data.len()).max().unwrap_or(0);
     let global_timestamps: Vec<f64> = (0..max_len).map(|t| {
         let base = t as f64 / ref_data.fs as f64;
@@ -198,18 +198,16 @@ fn run_session_extraction(
         base + jitter
     }).collect();
 
-    // Streaming Logic
     let (chunk_size, step_size) = match mode {
         WaveformMode::Global => (max_len, max_len),
-        WaveformMode::Incremental => (15, 12), // Small chunk (0.5s), 3 frame overlap
-        WaveformMode::Windowed { .. } => (30, 25), // Standard chunk (1.0s), 5 frame overlap
+        WaveformMode::Incremental => (15, 12), 
+        WaveformMode::Windowed { .. } => (30, 25), 
     };
     
-    let mut final_results: HashMap<String, f32> = HashMap::new();
+    let mut final_results: HashMap<String, (f32, f32)> = HashMap::new();
     let mut start = 0;
 
-    // Log Start
-    println!("  -> Running Mode: {:?} (Chunk {}, Step {})", mode, chunk_size, step_size);
+    println!(" -> Running Mode: {:?} (Chunk {}, Step {})", mode, chunk_size, step_size);
 
     while start < max_len {
         let end = (start + chunk_size).min(max_len);
@@ -222,9 +220,13 @@ fn run_session_extraction(
             if start < case.input_data.len() {
                 let case_end = (start + chunk_size).min(case.input_data.len());
                 if case_end > start {
-                    let slice = &case.input_data[start..case_end];
-                    signal_map.insert(case.input_signal_key.clone(), slice.to_vec());
-                    confidence_map.insert(case.input_signal_key.clone(), vec![1.0; slice.len()]);
+                    // SLICE THE DATA
+                    let slice_data = &case.input_data[start..case_end];
+                    signal_map.insert(case.input_signal_key.clone(), slice_data.to_vec());
+
+                    // SLICE THE CONFIDENCE
+                    let slice_conf = &case.input_confidence[start..case_end];
+                    confidence_map.insert(case.input_signal_key.clone(), slice_conf.to_vec());
                 }
             }
         }
@@ -240,7 +242,12 @@ fn run_session_extraction(
 
         for (key, val) in result.signals {
             if let Some(v) = val.value {
-                final_results.insert(key, v);
+                let conf = if !val.confidence.is_empty() {
+                    val.confidence.iter().sum::<f32>() / val.confidence.len() as f32
+                } else {
+                    0.0
+                };
+                final_results.insert(key, (v, conf));
             }
         }
 
