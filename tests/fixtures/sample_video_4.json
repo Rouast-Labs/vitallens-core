@@ -21227,6 +21227,12 @@
             "unit": "ratio",
             "confidence": 1.0,
             "note": "Global estimate of I:E Ratio using VitalLens API"
+		},
+        "stress_index": {
+			"value": 40.0,
+            "unit": "SI",
+            "confidence": 0.9604,
+            "note": "Global estimate of Stress Index using VitalLens API"
 		}
     },
     "fs": 30.0,

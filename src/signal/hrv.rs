@@ -196,49 +196,41 @@ pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
 }
 
 /// Calculates Baevsky Stress Index (SI).
-/// SI = AMo / (2 * Mo * MxDMn)
-/// - AMo: Amplitude of Mode (percent of intervals in the mode bin)
-/// - Mo: Mode (most frequent interval value in seconds)
-/// - MxDMn: Variational range (max - min interval in seconds)
 pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
     if nn_intervals_ms.len() < 5 { return 0.0; }
 
-    let bin_size = 50.0; // Standard 50ms bins
+    let bin_size = 50.0;
     let min_val = nn_intervals_ms.iter().fold(f32::INFINITY, |a, &b| a.min(b));
     let max_val = nn_intervals_ms.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
-    if (max_val - min_val).abs() < f32::EPSILON { return 0.0; }
+    // Align the start of the first bin to a multiple of 50ms 
+    // e.g., 612ms becomes 600ms.
+    let bin_offset = (min_val / bin_size).floor() * bin_size;
+    let range = max_val - min_val;
 
-    let num_bins = ((max_val - min_val) / bin_size).ceil() as usize + 1;
+    if range < f32::EPSILON { return 0.0; }
+
+    let num_bins = ((max_val - bin_offset) / bin_size).ceil() as usize + 1;
     let mut histogram = vec![0; num_bins];
 
     for &interval in nn_intervals_ms {
-        let bin_idx = ((interval - min_val) / bin_size).floor() as usize;
-        if bin_idx < histogram.len() {
-            histogram[bin_idx] += 1;
-        }
+        let bin_idx = ((interval - bin_offset) / bin_size).floor() as usize;
+        histogram[bin_idx] += 1;
     }
 
     let (max_count_idx, &max_count) = histogram.iter().enumerate()
         .max_by_key(|&(_, count)| count)
         .unwrap_or((0, &0));
 
-    if max_count == 0 { return 0.0; }
-
-    // AMo: Amplitude of Mode (%)
     let amo = (max_count as f32 / nn_intervals_ms.len() as f32) * 100.0;
-
-    // Mo: Mode (seconds) - center of the bin
-    let mode_ms = min_val + (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
-    let mo_sec = mode_ms / 1000.0;
-
-    // MxDMn: Range (seconds)
-    let mxdmn_sec = (max_val - min_val) / 1000.0;
     
-    // Prevent division by zero
+    // Mo is the center of the winning fixed bin
+    let mode_ms = bin_offset + (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
+    let mo_sec = mode_ms / 1000.0;
+    let mxdmn_sec = range / 1000.0;
+    
     if mo_sec <= 0.0 || mxdmn_sec <= 0.0 { return 0.0; }
 
-    // Formula: SI = AMo / (2 * Mo * MxDMn)
     amo / (2.0 * mo_sec * mxdmn_sec)
 }
 

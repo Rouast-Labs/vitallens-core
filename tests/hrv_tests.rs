@@ -10,7 +10,8 @@ use vitallens_core::registry::{self, HrvMetric};
 // Tolerance for HRV metrics
 const SDNN_TOLERANCE_MS: f32 = 5.0;
 const RMSSD_TOLERANCE_MS: f32 = 5.0;
-const LFHF_TOLERANCE: f32 = 0.5; // Ratio tolerance
+const LFHF_TOLERANCE: f32 = 0.5;
+const STRESS_INDEX_TOLERANCE: f32 = 20.0;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
@@ -24,7 +25,8 @@ struct Vitals {
     heart_rate: Option<ScalarResult>,
     hrv_sdnn: Option<ScalarResult>,
     hrv_rmssd: Option<ScalarResult>,
-    hrv_lfhf: Option<ScalarResult>, // NEW
+    hrv_lfhf: Option<ScalarResult>,
+    stress_index: Option<ScalarResult>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -195,6 +197,57 @@ fn verify_lfhf(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn verify_stress_index(
+    filename: &str,
+    fs: f32,
+    signal: &[f32], 
+    confidence_source: Option<&Vec<f32>>,
+    ground_truth_si: f32,
+    rate_hint: Option<f32>
+) -> Result<(), String> {
+    
+    let meta_hr = registry::get_vital_meta("heart_rate").unwrap();
+    let deriv_hr = &meta_hr.derivations[0];
+    
+    let meta_si = registry::get_vital_meta("stress_index").unwrap();
+    let deriv_si = &meta_si.derivations[0];
+
+    let duration_sec = signal.len() as f32 / fs;
+    if duration_sec < deriv_si.min_window_seconds {
+        println!("[{}] STRESS INDEX SKIPPED: Duration {:.1}s < Min Window {:.1}s", 
+            filename, duration_sec, deriv_si.min_window_seconds);
+        return Ok(());
+    }
+
+    let confidence = confidence_source.cloned().unwrap_or_else(|| vec![1.0; signal.len()]);
+
+    let timestamps: Vec<f64> = (0..signal.len()).map(|i| i as f64 / fs as f64).collect();
+    let bounds = peaks::SignalBounds { 
+        min_rate: deriv_hr.min_value, 
+        max_rate: deriv_hr.max_value 
+    };
+
+    let (calculated, calc_conf) = hrv::estimate_hrv(
+        signal, fs, HrvMetric::StressIndex, &timestamps, &confidence, bounds, rate_hint
+    );
+
+    let diff = (calculated - ground_truth_si).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
+    
+    println!("[{}] Stress Index: Calc={:.2} (Conf {:.2}), Ref={:.2}, Diff={:.2}", filename, calculated, calc_conf, ground_truth_si, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] Stress Index Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
+
+    if diff <= STRESS_INDEX_TOLERANCE {
+        Ok(())
+    } else {
+        Err(format!("[{}] Stress Index Mismatch. Expected {:.2}, Got {:.2} (Diff {:.2})", filename, ground_truth_si, calculated, diff))
+    }
+}
+
 // --- Main Test Runner ---
 
 #[test_resources("tests/fixtures/*.json")]
@@ -237,6 +290,15 @@ fn test_hrv_integrity(resource: &str) {
         if let Some(lfhf_ref) = &ref_data.vital_signs.hrv_lfhf {
             if let Err(e) = verify_lfhf(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), lfhf_ref.value, rate_hint
+            ) {
+                failures.push(e);
+            }
+        }
+
+        // 4. Verify Stress Index
+        if let Some(si_ref) = &ref_data.vital_signs.stress_index {
+            if let Err(e) = verify_stress_index(
+                filename, fs, &ppg.data, ppg.confidence.as_ref(), si_ref.value, rate_hint
             ) {
                 failures.push(e);
             }

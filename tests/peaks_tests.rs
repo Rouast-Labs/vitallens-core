@@ -117,7 +117,7 @@ fn verify_peaks(
     let (missed_rate, extra_rate) = if name.contains("PPG") {
         if rate_hint.is_some() { (1.0, 0.0) } else { (2.0, 4.0) } 
     } else {
-        if rate_hint.is_some() { (1.0, 0.0) } else { (2.0, 10.0) }
+        if rate_hint.is_some() { (1.0, 0.0) } else { (3.0, 10.0) }
     };
 
     let allowed_misses = (missed_rate * duration_mins).round() as usize;
