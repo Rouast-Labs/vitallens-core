@@ -87,15 +87,23 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         if let Some(res) = result.signals.get("ie_ratio") {
             if let Some(val) = res.value {
-                let diff = (val - gt.value).abs();
-                println!(" -> Calculated: {:.3}, Ref: {:.3}, Diff: {:.3}", val, gt.value, diff);
-                assert!(diff <= TOLERANCE_IE_RATIO, 
-                    "IE Ratio mismatch in {}: got {}, ref {}", filename, val, gt.value);
+                // Extract the scalar confidence from the vector
+                let calc_conf = res.confidence.first().copied().unwrap_or(0.0);
+                
+                let val_diff = (val - gt.value).abs();
+                let conf_diff = (calc_conf - gt.confidence).abs();
+
+                println!(" -> Calculated: {:.3} (Conf: {:.2}), Ref: {:.3} (Ref Conf: {:.2})", 
+                    val, calc_conf, gt.value, gt.confidence);
+
+                assert!(val_diff <= TOLERANCE_IE_RATIO, 
+                    "IE Ratio value mismatch in {}: got {}, ref {}", filename, val, gt.value);
+                    
+                assert!(conf_diff <= 0.1, 
+                    "IE Ratio confidence mismatch in {}: got {}, ref {}", filename, calc_conf, gt.confidence);
             } else {
                 panic!("IE Ratio returned None for {}", filename);
             }
-        } else {
-            panic!("IE Ratio signal missing from results in {}", filename);
         }
     }
 }

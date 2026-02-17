@@ -136,7 +136,8 @@ fn test_session(resource: &str) {
 
         // --- INCREMENTAL Length Checks ---
         if let Some((data, conf)) = inc_waves.get(wave_key) {
-             assert_eq!(data.len(), case.input_data.len(), "INCREMENTAL total entries mismatch for {}", wave_key);
+            assert_eq!(data.len(), case.input_data.len(), "INCREMENTAL total entries mismatch for {}", wave_key);
+            assert_eq!(data.len(), conf.len(), "INCREMENTAL {} data/conf length mismatch", wave_key);
         }
 
         // --- WINDOWED Length Checks ---
@@ -145,6 +146,7 @@ fn test_session(resource: &str) {
             let expected_len = window_frames.min(case.input_data.len());
             
             assert!(data.len() >= expected_len, "WINDOWED entries for {} insufficient", wave_key);
+            assert_eq!(data.len(), conf.len(), "WINDOWED {} data/conf length mismatch", wave_key);
         }
         
         if let Some((val, conf)) = global_results.get(vid) {
