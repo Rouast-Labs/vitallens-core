@@ -317,8 +317,13 @@ impl SessionCore {
                         
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
                             if full_data.len() >= (proc_cfg.min_window_seconds * fs) as usize {
-                                //crate::signal::filters::apply_processing(&full_data, proc_cfg.operation, fs)
-                                full_data
+                                crate::signal::filters::apply_processing(
+                                    &full_data, 
+                                    proc_cfg.operation, 
+                                    fs,
+                                    proc_cfg.min_freq,
+                                    proc_cfg.max_freq
+                                )
                             } else {
                                 full_data
                             }

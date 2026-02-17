@@ -50,6 +50,8 @@ pub enum PostProcessOp {
 pub struct ProcessingConfig {
     pub operation: PostProcessOp, 
     pub min_window_seconds: f32,
+    pub min_freq: Option<f32>,
+    pub max_freq: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -73,8 +75,10 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             vital_type: VitalType::Provided,
             derivations: vec![],
             processing: Some(ProcessingConfig {
-                operation: PostProcessOp::Detrend,
+                operation: PostProcessOp::MovingAverageStandardize,
                 min_window_seconds: 5.0,
+                min_freq: Some(0.67),
+                max_freq: Some(3.67),
             }),
             unit: "unitless".to_string(),
             display_name: "PPG Waveform".to_string(),
@@ -86,8 +90,10 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             vital_type: VitalType::Provided,
             derivations: vec![],
             processing: Some(ProcessingConfig {
-                operation: PostProcessOp::Detrend,
+                operation: PostProcessOp::MovingAverageStandardize,
                 min_window_seconds: 10.0,
+                min_freq: Some(0.05),
+                max_freq: Some(1.0),
             }),
             unit: "unitless".to_string(),
             display_name: "RESP Waveform".to_string(),
@@ -249,6 +255,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: Some(ProcessingConfig {
                 operation: PostProcessOp::None,
                 min_window_seconds: 5.0,
+                min_freq: None,
+                max_freq: None,
             }),
             unit: "mmHg".to_string(),
             display_name: "ABP Waveform".to_string(),
