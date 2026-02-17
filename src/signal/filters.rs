@@ -4,9 +4,14 @@ pub fn apply_processing(
     signal: &[f32], 
     op: crate::registry::PostProcessOp,
     fs: f32,
+    min_freq: Option<f32>,
+    _max_freq: Option<f32>,
 ) -> Vec<f32> {
     match op {
-        crate::registry::PostProcessOp::Detrend => detrend(signal, fs),
+        crate::registry::PostProcessOp::Detrend => {
+            let cutoff = min_freq.unwrap_or(0.0);
+            detrend(signal, fs, cutoff)
+        },
         crate::registry::PostProcessOp::Standardize => standardize(signal),
         crate::registry::PostProcessOp::None => signal.to_vec(),
     }
@@ -70,20 +75,122 @@ pub fn estimate_moving_average_window(fs: f32, cutoff_hz: f32, force_odd: bool) 
     size_int.max(1)
 }
 
-/// Removes low-frequency trends by subtracting a moving average.
-/// This is a high-pass filter equivalent suitable for rPPG.
-// TODO: Proper implementation (from prpy)
-// TODO: Test (from prpy)
-pub fn detrend(signal: &[f32], fs: f32) -> Vec<f32> {
-    // Standard window for rPPG detrending is roughly 1.0 second (fs frames)
-    let window_size = fs.ceil() as usize; 
+/// Calculates the regularization parameter lambda for a desired cutoff frequency.
+pub fn detrend_lambda_for_cutoff(fs: f32, cutoff: f32) -> f32 {
+    if cutoff <= 1e-5 {
+        return 0.0;
+    }
+    0.075 * (fs / cutoff).powi(2)
+}
+
+/// Detrending using Tarvainen-Valtonen (Smoothness Priors) method.
+/// 
+/// # Arguments
+/// * `signal` - Input data
+/// * `fs` - Sampling rate
+/// * `cutoff` - High-pass cutoff frequency in Hz (frequencies below this are removed)
+pub fn detrend(signal: &[f32], fs: f32, cutoff: f32) -> Vec<f32> {
+    let n = signal.len();
+    if n < 3 {
+        return vec![0.0; n];
+    }
+
+    let lambda = detrend_lambda_for_cutoff(fs, cutoff);
+    detrend_with_lambda(signal, lambda)
+}
+
+/// Raw Detrending where Lambda is provided directly.
+pub fn detrend_with_lambda(signal: &[f32], lambda: f32) -> Vec<f32> {
+    let n = signal.len();
+    if n < 3 {
+        return vec![0.0; n];
+    }
     
-    let trend = moving_average(signal, window_size);
+    let lambda_sq = lambda * lambda;
+
+    // A is symmetric pentadiagonal.     
+    let mut d0 = vec![0.0; n];
+    let mut d1 = vec![0.0; n - 1];
+    let mut d2 = vec![0.0; n - 2];
+
+    for i in 0..n {
+        if i == 0 {
+            d0[i] = 1.0 + lambda_sq * 1.0;
+            if n > 1 { d1[i] = lambda_sq * -2.0; }
+            if n > 2 { d2[i] = lambda_sq * 1.0; }
+        } else if i == 1 {
+            d0[i] = 1.0 + lambda_sq * 5.0;
+            if n > 2 { d1[i] = lambda_sq * -4.0; }
+            if n > 3 { d2[i] = lambda_sq * 1.0; }
+        } else if i < n - 2 {
+            d0[i] = 1.0 + lambda_sq * 6.0;
+            d1[i] = lambda_sq * -4.0;
+            d2[i] = lambda_sq * 1.0;
+        } else if i == n - 2 {
+            d0[i] = 1.0 + lambda_sq * 5.0;
+            d1[i] = lambda_sq * -2.0;
+        } else if i == n - 1 {
+            d0[i] = 1.0 + lambda_sq * 1.0;
+        }
+    }
+
+    let trend = solve_cholesky_banded(&d0, &d1, &d2, signal);
+
+    signal.iter().zip(trend.iter()).map(|(s, t)| s - t).collect()
+}
+
+fn solve_cholesky_banded(d0: &[f32], d1: &[f32], d2: &[f32], y: &[f32]) -> Vec<f32> {
+    let n = d0.len();
+    if n == 0 { return Vec::new(); }
     
-    signal.iter()
-        .zip(trend.iter())
-        .map(|(raw, tr)| raw - tr)
-        .collect()
+    let mut l0 = vec![0.0; n];
+    let mut l1 = vec![0.0; n - 1]; 
+    let mut l2 = vec![0.0; n - 2]; 
+
+    // 1. Cholesky Decomposition
+    for i in 0..n {
+        if i >= 2 {
+            let val = d2[i-2]; 
+            l2[i-2] = val / l0[i-2];
+        }
+        if i >= 1 {
+            let mut sum = 0.0;
+            if i >= 2 {
+                sum += l2[i-2] * l1[i-2];
+            }
+            let val = d1[i-1];
+            l1[i-1] = (val - sum) / l0[i-1];
+        }
+        let mut sum_sq = 0.0;
+        if i >= 1 { sum_sq += l1[i-1] * l1[i-1]; }
+        if i >= 2 { sum_sq += l2[i-2] * l2[i-2]; }
+        
+        let val = d0[i] - sum_sq;
+        if val <= 0.0 {
+            return vec![0.0; n]; 
+        }
+        l0[i] = val.sqrt();
+    }
+
+    // 2. Forward Substitution
+    let mut z = vec![0.0; n];
+    for i in 0..n {
+        let mut sum = 0.0;
+        if i >= 1 { sum += l1[i-1] * z[i-1]; }
+        if i >= 2 { sum += l2[i-2] * z[i-2]; }
+        z[i] = (y[i] - sum) / l0[i];
+    }
+
+    // 3. Backward Substitution
+    let mut x = vec![0.0; n];
+    for i in (0..n).rev() {
+        let mut sum = 0.0;
+        if i + 1 < n { sum += l1[i] * x[i+1]; } 
+        if i + 2 < n { sum += l2[i] * x[i+2]; } 
+        x[i] = (z[i] - sum) / l0[i];
+    }
+
+    x
 }
 
 /// Z-Score normalization (Zero Mean, Unit Variance).
@@ -92,29 +199,27 @@ pub fn detrend(signal: &[f32], fs: f32) -> Vec<f32> {
 // TODO: Check implementation (from prpy)
 // TODO: Test (from prpy)
 pub fn standardize(signal: &[f32]) -> Vec<f32> {
-    if signal.is_empty() {
-        return Vec::new();
-    }
+    if signal.is_empty() { return Vec::new(); }
 
-    let len = signal.len() as f32;
-    let mean = signal.iter().sum::<f32>() / len;
+    let (sum, count) = signal.iter().fold((0.0, 0), |(s, c), &x| {
+        if x.is_finite() { (s + x, c + 1) } else { (s, c) }
+    });
+
+    if count == 0 { return vec![0.0; signal.len()]; }
+    let mean = sum / count as f32;
+
+    let var_sum = signal.iter().fold(0.0, |s, &x| {
+        if x.is_finite() { s + (x - mean).powi(2) } else { s }
+    });
     
-    let variance = signal.iter()
-        .map(|v| {
-            let diff = v - mean;
-            diff * diff
-        })
-        .sum::<f32>() / len;
+    let std_dev = (var_sum / count as f32).sqrt();
 
-    let std_dev = variance.sqrt();
-
-    // Prevent division by zero if signal is flat
     if std_dev.abs() < 1e-6 {
         return vec![0.0; signal.len()];
     }
 
     signal.iter()
-        .map(|v| (v - mean) / std_dev)
+        .map(|&v| if v.is_finite() { (v - mean) / std_dev } else { 0.0 })
         .collect()
 }
 
@@ -125,13 +230,6 @@ mod tests {
 
     #[test]
     fn test_ma_impulse_response() {
-        // Input: [0, 0, 10, 0, 0]
-        // Window 3:
-        // i=0 (win [0,0]): 0
-        // i=1 (win [0,0,10]): 3.33
-        // i=2 (win [0,10,0]): 3.33
-        // i=3 (win [10,0,0]): 3.33
-        // i=4 (win [0,0]): 0
         let data = vec![0.0, 0.0, 10.0, 0.0, 0.0];
         let result = moving_average(&data, 3);
         
@@ -226,12 +324,37 @@ mod tests {
     }
 
     #[test]
-    fn test_moving_average_centering() {
-        let data = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let result = moving_average(&data, 3);
-        assert!((result[1] - 2.0).abs() < 1e-5);
-        assert!((result[2] - 3.0).abs() < 1e-5);
-        assert!((result[3] - 4.0).abs() < 1e-5);
+    fn test_detrend_axis_minus_1() {
+        let z = vec![0.0, 0.4, 1.2, 2.0, 0.2];
+        let lambda = 3.0;
+        let result = detrend_with_lambda(&z, lambda);
+        
+        let expected = vec![-0.29326743, -0.18156859, 0.36271552, 0.99234445, -0.88022395];
+        
+        for (a, b) in result.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-6, "Expected {}, got {}", b, a);
+        }
+    }
+
+    #[test]
+    fn test_detrend_axis_minus_1_row_2() {
+        let z = vec![0.0, 0.1, 0.5, 0.3, -0.1];
+        let lambda = 3.0;
+        
+        let result = detrend_with_lambda(&z, lambda);
+
+        let expected = vec![-0.13389946, -0.06970109, 0.309375, 0.12595109, -0.23172554];
+        
+        for (a, b) in result.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-6, "Expected {}, got {}", b, a);
+        }
+    }
+
+    #[test]
+    fn test_detrend_preserves_length() {
+        let signal = vec![1.0; 10];
+        let res = detrend_with_lambda(&signal, 30.0);
+        assert_eq!(res.len(), 10);
     }
 
     #[test]
@@ -243,7 +366,7 @@ mod tests {
             let drift = t * 2.0; 
             signal.push(sine + drift);
         }
-        let clean = detrend(&signal, 30.0);
+        let clean = detrend(&signal, 30.0, 0.5);
         let mean = clean.iter().sum::<f32>() / clean.len() as f32;
         assert!(mean.abs() < 0.1, "Mean was {}", mean);
     }
