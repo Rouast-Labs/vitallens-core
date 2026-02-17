@@ -21221,8 +21221,15 @@
             "unit": "ms",
             "confidence": 0.9604,
             "note": "Global estimate of Heart Rate Variability (RMSSD) using vitallens-2.0, with confidence level."
-        }
+        },
+        "ie_ratio": {
+			"value": 0.6485,
+            "unit": "ratio",
+            "confidence": 1.0,
+            "note": "Global estimate of I:E Ratio using VitalLens API"
+		}
     },
     "fs": 30.0,
+    "source": "g.mov",
     "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes."
 }

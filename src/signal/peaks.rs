@@ -8,6 +8,13 @@ pub struct Peak {
 }
 
 #[derive(Debug, Clone, Copy)]
+pub struct Cycle {
+    pub start_valley: Peak, 
+    pub peak: Peak,
+    pub end_valley: Peak,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct SignalBounds {
     pub min_rate: f32,
     pub max_rate: f32,
@@ -26,6 +33,13 @@ pub struct PeakOptions {
     pub smooth_input: bool,
 }
 
+struct StatsResult {
+    working_signal: Vec<f32>,
+    means: Vec<f32>,
+    stds: Vec<f32>,
+    search_radius: usize,
+}
+
 impl Default for PeakOptions {
     fn default() -> Self {
         Self {
@@ -42,50 +56,34 @@ impl Default for PeakOptions {
     }
 }
 
-/// Detects peaks using a Centered Adaptive Z-Score.
-/// Returns a list of valid segments.
-pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
-    if signal.len() < 3 {
-        return Vec::new();
-    }
+// =========================================================================
+// SHARED LOGIC
+// =========================================================================
 
-    // 1. Optional pre-processing
-    let processed_data_storage;
+/// Helper: Handles pre-processing (smoothing) and statistical calculations (Z-Score).
+fn compute_statistics(signal: &[f32], options: &PeakOptions) -> StatsResult {
+    // 1. Preprocessing (Smoothing)
+    let smoothed_storage;
     let mut search_radius = 0;
+    
     let working_signal: &[f32] = if options.smooth_input {
         let cutoff_hz = options.bounds.max_rate / 60.0;
         let window = filters::estimate_moving_average_window(options.fs, cutoff_hz, true);
         search_radius = window / 2;
-        processed_data_storage = filters::moving_average(signal, window);
-        &processed_data_storage
+        
+        smoothed_storage = filters::moving_average(signal, window);
+        &smoothed_storage
     } else {
         signal
     };
 
-    // 2. Auto-tune parameters
-    
+    // 2. Rolling Statistics (Mean & Std Dev)
     let reference_rate = options.avg_rate_hint.unwrap_or(options.bounds.min_rate);
     let window_seconds = (60.0 / reference_rate) * options.window_cycles;
     
     let radius = ((window_seconds * options.fs) / 2.0).round() as usize;
     let radius = radius.max(2).min(working_signal.len() / 2);
 
-    let max_possible_rate = if let Some(avg) = options.avg_rate_hint {
-        let duration = working_signal.len() as f32 / options.fs;
-        let drift = options.max_rate_change_per_sec * (duration / 2.0);
-        (avg + drift).min(options.bounds.max_rate)
-    } else {
-        options.bounds.max_rate
-    };
-    
-    let min_dist_seconds = (60.0 / max_possible_rate) * (1.0 - options.interval_buffer);
-    let min_dist_samples = (min_dist_seconds * options.fs).ceil() as usize;
-
-    let slowest_period = 60.0 / options.bounds.min_rate;
-    let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
-    
-    // 3. Compute centered rolling stats (z-score algorithm)
-    
     let mut means = vec![0.0; working_signal.len()];
     let mut stds = vec![0.0; working_signal.len()];
     
@@ -118,8 +116,64 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         stds[i] = variance.max(0.0).sqrt();
     }
 
-    // 4. Peak detection logic
+    StatsResult {
+        working_signal: working_signal.to_vec(),
+        means,
+        stds,
+        search_radius,
+    }
+}
+
+/// Helper: Refines a peak location using quadratic interpolation.
+fn refine_location(signal: &[f32], idx: usize) -> f32 {
+    if idx > 0 && idx < signal.len() - 1 {
+        let y_l = signal[idx - 1];
+        let y_c = signal[idx];
+        let y_r = signal[idx + 1];
+
+        let denom = 2.0 * (y_l - 2.0 * y_c + y_r);
+        if denom.abs() > 1e-6 {
+            let delta = (y_l - y_r) / denom;
+            if delta.abs() <= 0.5 {
+                return idx as f32 + delta;
+            }
+        }
+    }
+    idx as f32
+}
+
+// =========================================================================
+// PUBLIC FUNCTIONS
+// =========================================================================
+
+pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
+    if signal.len() < 3 {
+        return Vec::new();
+    }
+
+    // Compute statistics
+    let stats = compute_statistics(signal, &options);
+    let working_signal = &stats.working_signal;
+    let means = &stats.means;
+    let stds = &stats.stds;
+    let search_radius = stats.search_radius;
+
+    // Auto-tune gating parameters
+    let max_possible_rate = if let Some(avg) = options.avg_rate_hint {
+        let duration = working_signal.len() as f32 / options.fs;
+        let drift = options.max_rate_change_per_sec * (duration / 2.0);
+        (avg + drift).min(options.bounds.max_rate)
+    } else {
+        options.bounds.max_rate
+    };
     
+    let min_dist_seconds = (60.0 / max_possible_rate) * (1.0 - options.interval_buffer);
+    let min_dist_samples = (min_dist_seconds * options.fs).ceil() as usize;
+
+    let slowest_period = 60.0 / options.bounds.min_rate;
+    let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
+    
+    // Peak detection logic
     let mut peaks: Vec<Peak> = Vec::new();
     let mut last_peak_idx: Option<usize> = None;
 
@@ -135,6 +189,7 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         };
 
         if is_candidate {
+            // Local maxima check on working signal
             if val > working_signal[i-1] && val >= working_signal[i+1] {
                 
                 let in_refractory_window = match last_peak_idx {
@@ -142,13 +197,14 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
                     None => false
                 };
 
-                let search_start = i.saturating_sub(search_radius);
-                let search_end = (i + search_radius + 1).min(signal.len());
-                
+                // Search for true max in raw signal if smoothing was applied
                 let mut best_idx = i;
                 let mut best_val = signal[i];
 
                 if search_radius > 0 {
+                    let search_start = i.saturating_sub(search_radius);
+                    let search_end = (i + search_radius + 1).min(signal.len());
+                    
                     for j in search_start..search_end {
                         if signal[j] > best_val {
                             best_val = signal[j];
@@ -163,18 +219,8 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
                     y: best_val,
                 };
 
-                if options.refine && best_idx > 0 && best_idx < signal.len() - 1 {
-                    let y_l = signal[best_idx - 1];
-                    let y_c = signal[best_idx];
-                    let y_r = signal[best_idx + 1];
-
-                    let denom: f32 = 2.0 * (y_l - 2.0 * y_c + y_r);
-                    if denom.abs() > 1e-6 {
-                        let delta = (y_l - y_r) / denom;
-                        if delta.abs() <= 0.5 {
-                            final_peak.x = best_idx as f32 + delta;
-                        }
-                    }
+                if options.refine {
+                    final_peak.x = refine_location(signal, best_idx);
                 }
 
                 if in_refractory_window {
@@ -196,8 +242,7 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         }
     }
 
-    // 5. Segmentation
-    
+    // Segmentation
     if peaks.is_empty() {
         return Vec::new();
     }
@@ -219,6 +264,123 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     segments.push(current_segment);
 
     segments
+}
+
+const EDGE_SEARCH_FRACTION: f32 = 0.6;
+
+pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
+    if signal.len() < 3 {
+        return Vec::new();
+    }
+
+    let peak_segments = find_peaks(signal, options);
+    let mut all_cycles = Vec::new();
+
+    for segment in peak_segments {
+        if segment.is_empty() { continue; }
+
+        // Determine average cycle duration (Samples)
+        let avg_cycle_samples = if let Some(rate) = options.avg_rate_hint {
+            if rate > 1e-5 {
+                (options.fs * 60.0 / rate).round() as usize
+            } else {
+                (options.fs * 60.0 / options.bounds.min_rate) as usize
+            }
+        } else if segment.len() > 1 {
+            let total_dist: f32 = segment.windows(2)
+                .map(|w| w[1].x - w[0].x)
+                .sum();
+            (total_dist / (segment.len() - 1) as f32).round() as usize
+        } else {
+            let slowest_period = 60.0 / options.bounds.min_rate;
+            (slowest_period * options.fs) as usize
+        };
+
+        // Refine edge search window
+        let edge_search_window = (avg_cycle_samples as f32 * EDGE_SEARCH_FRACTION) as usize;
+
+        // Intermediate valleys (Between peaks)
+        let mut valleys = Vec::new();
+        for i in 0..segment.len() - 1 {
+            let p_curr = segment[i];
+            let p_next = segment[i+1];
+
+            let start = (p_curr.index + 1).min(signal.len());
+            let end = p_next.index.min(signal.len());
+
+            if start < end {
+                let (min_idx, min_val) = find_min_in_range(signal, start, end);
+                
+                let mut v = Peak {
+                    index: min_idx,
+                    x: min_idx as f32,
+                    y: min_val
+                };
+                if options.refine { v.x = refine_location(signal, min_idx); }
+                valleys.push(v);
+            } else {
+                 valleys.push(Peak { index: start, x: start as f32, y: signal.get(start).copied().unwrap_or(0.0) });
+            }
+        }
+
+        // Start valley (Backwards search)
+        let p_first = segment[0];
+        let v_start_opt = if p_first.index >= edge_search_window {
+            let start_limit = p_first.index - edge_search_window;
+            let (idx, val) = find_min_in_range(signal, start_limit, p_first.index);
+            let mut v = Peak { index: idx, x: idx as f32, y: val };
+            if options.refine { v.x = refine_location(signal, idx); }
+            Some(v)
+        } else {
+            None
+        };
+
+        // End valley (Forwards search)
+        let p_last = segment[segment.len()-1];
+        let v_end_opt = if p_last.index + edge_search_window < signal.len() {
+            let end_limit = p_last.index + edge_search_window;
+            let (idx, val) = find_min_in_range(signal, p_last.index + 1, end_limit);
+            let mut v = Peak { index: idx, x: idx as f32, y: val };
+            if options.refine { v.x = refine_location(signal, idx); }
+            Some(v)
+        } else {
+            None
+        };
+        
+        let mut sequence_valleys: Vec<Option<Peak>> = Vec::with_capacity(valleys.len() + 2);
+        sequence_valleys.push(v_start_opt);
+        for v in valleys { sequence_valleys.push(Some(v)); }
+        sequence_valleys.push(v_end_opt);
+
+        for i in 0..segment.len() {
+            if let (Some(v_prev), Some(v_next)) = (sequence_valleys[i], sequence_valleys[i+1]) {
+                let peak = segment[i];
+                if v_prev.x < peak.x && peak.x < v_next.x {
+                    all_cycles.push(Cycle {
+                        start_valley: v_prev,
+                        peak,
+                        end_valley: v_next,
+                    });
+                }
+            }
+        }
+    }
+
+    all_cycles
+}
+
+fn find_min_in_range(signal: &[f32], start: usize, end: usize) -> (usize, f32) {
+    let slice = &signal[start..end];
+    if slice.is_empty() {
+        return (start, 0.0);
+    }
+
+    let (min_idx_local, min_val) = slice.iter()
+        .enumerate()
+        .min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+        .unwrap();
+
+    (start + min_idx_local, *min_val)
 }
 
 #[cfg(test)]

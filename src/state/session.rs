@@ -215,7 +215,12 @@ impl SessionCore {
                                 CalculationMethod::HrvFromPeaks(metric) => {
                                     let ts_slice = &self.timestamps[start_idx..];
                                     let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
-                                    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
+                                    let hr_meta = registry::get_vital_meta("heart_rate").unwrap();
+                                    let hr_deriv = &hr_meta.derivations[0];
+                                    let bounds = SignalBounds { 
+                                        min_rate: hr_deriv.min_value, 
+                                        max_rate: hr_deriv.max_value 
+                                    };
                                     crate::signal::hrv::estimate_hrv(
                                         data_slice,
                                         actual_fs,
@@ -240,13 +245,25 @@ impl SessionCore {
                                     crate::signal::bp::extract_pulse_pressure(data_slice, actual_fs, conf_slice)
                                 },
                                 CalculationMethod::IeRatio => {
-                                    crate::signal::resp::calculate_ie_ratio(data_slice, actual_fs, conf_slice)
+                                    let rate_hint = results.get("respiratory_rate").map(|(v, _)| *v);
+                                    let rr_meta = registry::get_vital_meta("respiratory_rate").unwrap();
+                                    let rr_deriv = &rr_meta.derivations[0];
+                                    let bounds = SignalBounds { 
+                                        min_rate: rr_deriv.min_value, 
+                                        max_rate: rr_deriv.max_value 
+                                    };
+                                    crate::signal::resp::calculate_ie_ratio(data_slice, actual_fs, conf_slice, bounds, rate_hint)
                                 },
                             };
 
                             if val >= cfg.min_value && val <= cfg.max_value {
                                 results.insert(vital_id.clone(), (val, conf));
                                 break;
+                            } else {
+                                log::warn!(
+                                    "[Session] Vital {}: Value {:.3} rejected by registry (Bounds: {:.1} - {:.1})", 
+                                    vital_id, val, cfg.min_value, cfg.max_value
+                                );
                             }
                         }
                     }

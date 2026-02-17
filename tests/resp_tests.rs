@@ -1,0 +1,101 @@
+// FILE: tests/resp_tests.rs
+
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+use serde::Deserialize;
+use test_generator::test_resources;
+
+use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
+use vitallens_core::registry;
+
+const TOLERANCE_IE_RATIO: f32 = 0.15;
+
+// --- LOGGER SETUP ---
+fn init_logger() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
+#[derive(Deserialize, Debug)]
+struct ReferenceData {
+    vital_signs: Vitals,
+    fs: f32, 
+}
+
+#[derive(Deserialize, Debug)]
+struct Vitals {
+    respiratory_waveform: Option<Waveform>,
+    ie_ratio: Option<ScalarResult>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Waveform {
+    data: Vec<f32>,
+    confidence: Option<Vec<f32>>,
+}
+
+#[derive(Deserialize, Debug)]
+struct ScalarResult {
+    value: f32,
+    confidence: f32,
+}
+
+#[test_resources("tests/fixtures/*.json")]
+fn test_ie_ratio_accuracy(resource: &str) {
+    init_logger();
+
+    let path = Path::new(resource);
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    let file = File::open(path).expect("Failed to open file");
+    let reader = BufReader::new(file);
+    let ref_data: ReferenceData = serde_json::from_reader(reader).expect("Failed to parse JSON");
+
+    if let (Some(gt), Some(resp)) = (ref_data.vital_signs.ie_ratio, ref_data.vital_signs.respiratory_waveform) {
+        let meta = registry::get_vital_meta("ie_ratio").unwrap();
+        let min_win = meta.derivations[0].min_window_seconds;
+        let duration_sec = resp.data.len() as f32 / ref_data.fs;
+
+        if duration_sec < min_win {
+            println!(" [SKIP] {} - insufficient duration ({:.1}s < {:.1}s)", filename, duration_sec, min_win);
+            return;
+        }
+
+        println!("=== TEST IE RATIO: {} ===", filename);
+
+        let config = ModelConfig {
+            name: "test_ie".to_string(),
+            // FIX: Added "respiratory_rate" here. 
+            // The Session sorts execution by dependency order, so Rate will be calc'd first
+            // and passed as a hint to I:E Ratio.
+            supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
+            fps_target: ref_data.fs,
+            input_size: 30,
+            roi_method: "face".to_string(),
+        };
+        
+        let session = Session::new(config);
+        let conf = resp.confidence.unwrap_or_else(|| vec![1.0; resp.data.len()]);
+
+        let chunk = InputChunk {
+            timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fs as f64).collect(),
+            signals: [("respiratory_waveform".to_string(), resp.data)].into(),
+            confidences: [("respiratory_waveform".to_string(), conf)].into(),
+            face: None,
+        };
+
+        let result = session.process_chunk(chunk, WaveformMode::Global);
+
+        if let Some(res) = result.signals.get("ie_ratio") {
+            if let Some(val) = res.value {
+                let diff = (val - gt.value).abs();
+                println!(" -> Calculated: {:.3}, Ref: {:.3}, Diff: {:.3}", val, gt.value, diff);
+                assert!(diff <= TOLERANCE_IE_RATIO, 
+                    "IE Ratio mismatch in {}: got {}, ref {}", filename, val, gt.value);
+            } else {
+                panic!("IE Ratio returned None for {}", filename);
+            }
+        } else {
+            panic!("IE Ratio signal missing from results in {}", filename);
+        }
+    }
+}

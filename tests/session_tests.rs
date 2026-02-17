@@ -13,6 +13,7 @@ const TOLERANCE_RR_BPM: f32 = 3.0;
 const TOLERANCE_SDNN_MS: f32 = 10.0;
 const TOLERANCE_RMSSD_MS: f32 = 10.0;
 const TOLERANCE_LFHF: f32 = 1.0;
+const TOLERANCE_IE_RATIO: f32 = 0.15;
 
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
 
@@ -31,6 +32,7 @@ struct Vitals {
     hrv_sdnn: Option<ScalarResult>,
     hrv_rmssd: Option<ScalarResult>,
     hrv_lfhf: Option<ScalarResult>,
+    ie_ratio: Option<ScalarResult>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -99,6 +101,7 @@ fn test_session(resource: &str) {
     add_case("hrv_sdnn", ref_data.vital_signs.hrv_sdnn.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SDNN_MS);
     add_case("hrv_rmssd", ref_data.vital_signs.hrv_rmssd.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_RMSSD_MS);
     add_case("hrv_lfhf", ref_data.vital_signs.hrv_lfhf.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_LFHF);
+    add_case("ie_ratio", ref_data.vital_signs.ie_ratio.as_ref(), ref_data.vital_signs.respiratory_waveform.as_ref(), "respiratory_waveform", TOLERANCE_IE_RATIO);
 
     if cases.is_empty() {
         println!(" [SKIP] No valid vitals found in file.");

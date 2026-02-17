@@ -2588,7 +2588,13 @@
  			"unit": "ms",
  			"confidence": 1.0,
  			"note": "Global estimate of HRV (RMSSD) using VitalLens API along with a confidence level between 0 and 1."
- 		}
+ 		},
+        "ie_ratio": {
+			"value": 1.12,
+            "unit": "ratio",
+            "confidence": 1.0,
+            "note": "Global estimate of I:E Ratio using VitalLens API"
+		}
     },
     "face": {
         "confidence": [

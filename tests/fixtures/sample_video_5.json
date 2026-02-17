@@ -17148,8 +17148,15 @@
             "unit": "bpm",
             "confidence": 0.9977,
             "note": "Global estimate of Respiratory Rate using vitallens-2.0, with confidence level."
-        }
+        },
+        "ie_ratio": {
+			"value": 0.8067,
+            "unit": "ratio",
+            "confidence": 1.0,
+            "note": "Global estimate of I:E Ratio using VitalLens API"
+		}
     },
     "fs": 28.64,
+    "source": "after_exercise/vid.mp4",
     "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes."
 }
