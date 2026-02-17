@@ -194,10 +194,6 @@ fn solve_cholesky_banded(d0: &[f32], d1: &[f32], d2: &[f32], y: &[f32]) -> Vec<f
 }
 
 /// Z-Score normalization (Zero Mean, Unit Variance).
-/// Robust to outliers? No, standard Z-score. 
-/// Vital for FFT to prevent spectral leakage from offsets.
-// TODO: Check implementation (from prpy)
-// TODO: Test (from prpy)
 pub fn standardize(signal: &[f32]) -> Vec<f32> {
     if signal.is_empty() { return Vec::new(); }
 
@@ -372,12 +368,72 @@ mod tests {
     }
 
     #[test]
-    fn test_standardize_calculates_zscore() {
-        let data = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+    fn test_standardize_normal() {
+        // [10, 20, 30] -> Mean 20, Var sum = 100+0+100=200, Var=200/3=66.66, Std=8.165
+        let data = vec![10.0, 20.0, 30.0];
         let res = standardize(&data);
-        let mean = res.iter().sum::<f32>() / res.len() as f32;
-        let variance = res.iter().map(|x| x * x).sum::<f32>() / res.len() as f32;
-        assert!(mean.abs() < 1e-5);
-        assert!((variance - 1.0).abs() < 1e-5);
+        
+        let expected_std = (200.0f32 / 3.0).sqrt();
+        assert!((res[0] - (-10.0 / expected_std)).abs() < 1e-5);
+        assert!((res[1] - 0.0).abs() < 1e-5);
+        assert!((res[2] - (10.0 / expected_std)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_standardize_flatline() {
+        // Zero variance should return all zeros, not NaNs/Infs
+        let data = vec![5.0, 5.0, 5.0];
+        let res = standardize(&data);
+        assert_eq!(res, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_standardize_single_element() {
+        // Single element has undefined (or zero) variance. Should return 0.
+        let data = vec![42.0];
+        let res = standardize(&data);
+        assert_eq!(res, vec![0.0]);
+    }
+
+    #[test]
+    fn test_standardize_mixed_nans() {
+        // [10, NaN, 30] -> Mean/Std computed on [10, 30] -> Mean 20, Std 10.
+        // Result: [(10-20)/10, 0.0, (30-20)/10] -> [-1.0, 0.0, 1.0]
+        let data = vec![10.0, f32::NAN, 30.0];
+        let res = standardize(&data);
+        
+        assert!((res[0] - (-1.0)).abs() < 1e-5);
+        assert_eq!(res[1], 0.0); // NaNs are replaced by mean (0.0)
+        assert!((res[2] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_standardize_all_nans() {
+        let data = vec![f32::NAN, f32::NAN];
+        let res = standardize(&data);
+        assert_eq!(res, vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_standardize_high_offset() {
+        // Z-score should be invariant to DC offset
+        // [1, 2, 3] vs [1001, 1002, 1003] -> Output should be identical
+        let normal = vec![1.0, 2.0, 3.0];
+        let offset = vec![1001.0, 1002.0, 1003.0];
+        
+        let res_norm = standardize(&normal);
+        let res_off = standardize(&offset);
+        
+        for (a, b) in res_norm.iter().zip(res_off.iter()) {
+            assert!((a - b).abs() < 1e-5);
+        }
+    }
+    
+    #[test]
+    fn test_standardize_tiny_variance() {
+        // Variance below 1e-6 threshold should clamp to zero to avoid explosion
+        let data = vec![1.0, 1.0000001, 1.0];
+        let res = standardize(&data);
+        assert_eq!(res, vec![0.0, 0.0, 0.0]);
     }
 }
