@@ -37359,9 +37359,9 @@
             ]
         },
         "stress_index": {
-            "value": 52.18,
+            "value": 75.0,
             "confidence": 0.99,
-            "note": "Ground Truth (NeuroKit2 Verified)"
+            "note": "Ground Truth (Manual)"
         },
         "hrv_pnn50": {
             "value": 6.19,

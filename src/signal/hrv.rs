@@ -1,4 +1,5 @@
 use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks};
+use crate::signal::filters; 
 
 #[derive(Debug, Clone, Copy)]
 pub struct HrvOptions {
@@ -165,26 +166,24 @@ pub fn calculate_rmssd(nn_intervals: &[f32]) -> f32 {
     (sum_sq_diff / (nn_intervals.len() - 1) as f32).sqrt()
 }
 
-/// Calculates the LF/HF ratio (Autonomic Balance).
-/// Uses a high-resolution Periodogram on 4Hz resampled data.
 pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
     const FS_R: f32 = 4.0;
+    
     let resampled = resample_nn_intervals(nn_intervals, FS_R);
+    
+    let detrended = filters::detrend(&resampled, FS_R, 0.04);
     
     let mut scratch = crate::signal::fft::FftScratch::new();
     
-    crate::signal::fft::compute_periodogram(&resampled, FS_R, 0.001, &mut scratch);
+    crate::signal::fft::compute_periodogram(&detrended, FS_R, 0.001, &mut scratch, false);
     
     let mut lf_power = 0.0;
     let mut hf_power = 0.0;
 
     for (i, &f) in scratch.frequencies.iter().enumerate() {
-        
         if f >= 0.04 && f < 0.15 {
             lf_power += scratch.power[i];
-        } 
-        
-        else if f >= 0.15 && f <= 0.40 {
+        } else if f >= 0.15 && f <= 0.40 {
             hf_power += scratch.power[i];
         }
     }
@@ -204,19 +203,17 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
     let min_val = nn_intervals_ms.iter().fold(f32::INFINITY, |a, &b| a.min(b));
     let max_val = nn_intervals_ms.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
-    // Align the start of the first bin to a multiple of 50ms 
-    // e.g., 612ms becomes 600ms.
-    let bin_offset = (min_val / bin_size).floor() * bin_size;
     let range = max_val - min_val;
-
     if range < f32::EPSILON { return 0.0; }
 
-    let num_bins = ((max_val - bin_offset) / bin_size).ceil() as usize + 1;
-    let mut histogram = vec![0; num_bins];
+    let max_bin_idx = (max_val / bin_size).floor() as usize;
+    let mut histogram = vec![0; max_bin_idx + 1];
 
     for &interval in nn_intervals_ms {
-        let bin_idx = ((interval - bin_offset) / bin_size).floor() as usize;
-        histogram[bin_idx] += 1;
+        let bin_idx = (interval / bin_size).floor() as usize;
+        if bin_idx < histogram.len() {
+            histogram[bin_idx] += 1;
+        }
     }
 
     let (max_count_idx, &max_count) = histogram.iter().enumerate()
@@ -225,8 +222,9 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
 
     let amo = (max_count as f32 / nn_intervals_ms.len() as f32) * 100.0;
     
-    // Mo is the center of the winning fixed bin
-    let mode_ms = bin_offset + (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
+    // Mode is the center of the bin
+    let mode_ms = (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
+    
     let mo_sec = mode_ms / 1000.0;
     let mxdmn_sec = range / 1000.0;
     

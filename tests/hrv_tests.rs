@@ -10,8 +10,8 @@ use vitallens_core::registry::{self, HrvMetric};
 // Tolerance for HRV metrics
 const SDNN_TOLERANCE_MS: f32 = 5.0;
 const RMSSD_TOLERANCE_MS: f32 = 5.0;
-const LFHF_TOLERANCE: f32 = 3.0; // TODO: Make tighter when debugged
-const STRESS_INDEX_TOLERANCE: f32 = 300.0; // TODO: Make tighter when debugged
+const LFHF_TOLERANCE: f32 = 0.5;
+const STRESS_INDEX_TOLERANCE: f32 = 20.0;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {

@@ -23,7 +23,8 @@ pub fn compute_periodogram(
     signal: &[f32], 
     fs: f32, 
     target_res_hz: f32,
-    scratch: &mut FftScratch 
+    scratch: &mut FftScratch,
+    apply_window: bool
 ) {
     let len = signal.len();
     if len < 2 {
@@ -34,30 +35,32 @@ pub fn compute_periodogram(
 
     let mean: f32 = signal.iter().sum::<f32>() / len as f32;
     
-    // Reuse 'windowed' buffer (No allocation if capacity exists)
     scratch.windowed.clear();
-    // Pre-calculate windowing
-    for (i, &x) in signal.iter().enumerate() {
-        let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (len - 1) as f32).cos());
-        scratch.windowed.push((x - mean) * w);
+    
+    if apply_window {
+        for (i, &x) in signal.iter().enumerate() {
+            let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / (len - 1) as f32).cos());
+            scratch.windowed.push((x - mean) * w);
+        }
+    } else {
+        for &x in signal.iter() {
+            scratch.windowed.push(x - mean);
+        }
     }
 
     let min_fft_len = (fs / target_res_hz) as usize;
     let fft_len = min_fft_len.max(len).next_power_of_two();
     
-    // Reuse complex buffer
     scratch.complex_buffer.clear();
     for &x in &scratch.windowed {
         scratch.complex_buffer.push(Complex::new(x, 0.0));
     }
     scratch.complex_buffer.resize(fft_len, Complex::new(0.0, 0.0));
 
-    // Execute FFT
     let mut planner = FftPlanner::new();
     let fft = planner.plan_fft_forward(fft_len);
     fft.process(&mut scratch.complex_buffer);
 
-    // Compute Power
     let num_bins = fft_len / 2;
     let freq_per_bin = fs / fft_len as f32;
     
@@ -87,7 +90,7 @@ pub fn estimate_rate_periodogram(
         }
     };
 
-    compute_periodogram(signal, fs, target_res_hz, scratch);
+    compute_periodogram(signal, fs, target_res_hz, scratch, true);
     
     if scratch.frequencies.is_empty() {
         return (0.0, 0.0);
@@ -323,7 +326,7 @@ mod tests {
         let signal = vec![0.0; 100];
         
         let mut scratch = FftScratch::new();
-        compute_periodogram(&signal, fs, target_res, &mut scratch);
+        compute_periodogram(&signal, fs, target_res, &mut scratch, true);
         
         // Read from scratch
         let actual_res = scratch.frequencies[1] - scratch.frequencies[0];
@@ -340,7 +343,7 @@ mod tests {
             .get();
         
         let mut scratch = FftScratch::new();
-        compute_periodogram(&signal, fs, 0.01, &mut scratch);
+        compute_periodogram(&signal, fs, 0.01, &mut scratch, true);
         
         let (max_idx, _) = scratch.power.iter()
             .enumerate()
@@ -360,10 +363,10 @@ mod tests {
         
         let mut scratch = FftScratch::new();
         
-        compute_periodogram(&sig1, fs, 0.1, &mut scratch);
+        compute_periodogram(&sig1, fs, 0.1, &mut scratch, true);
         let max_p1 = *scratch.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
 
-        compute_periodogram(&sig2, fs, 0.1, &mut scratch);
+        compute_periodogram(&sig2, fs, 0.1, &mut scratch, true);
         let max_p2 = *scratch.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();
         
         let ratio = max_p2 / max_p1;
@@ -379,7 +382,7 @@ mod tests {
             .get();
             
         let mut scratch = FftScratch::new();
-        compute_periodogram(&signal, fs, 0.1, &mut scratch);
+        compute_periodogram(&signal, fs, 0.1, &mut scratch, true);
         
         let dc_power = scratch.power[0];
         let sig_power = *scratch.power.iter().max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap();

@@ -12,9 +12,9 @@ const TOLERANCE_HR_BPM: f32 = 3.0;
 const TOLERANCE_RR_BPM: f32 = 3.0;
 const TOLERANCE_SDNN_MS: f32 = 10.0;
 const TOLERANCE_RMSSD_MS: f32 = 10.0;
-const TOLERANCE_LFHF: f32 = 3.0; // TODO: Make tighter when debugged
 const TOLERANCE_IE_RATIO: f32 = 0.15;
-const TOLERANCE_STRESS_INDEX: f32 = 300.0; // TODO: Make tighter when debugged
+const TOLERANCE_LFHF: f32 = 0.5;
+const TOLERANCE_STRESS_INDEX: f32 = 20.0;
 
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
 
@@ -58,6 +58,8 @@ struct TestCase {
     input_data: Vec<f32>,
     input_confidence: Vec<f32>,
 }
+
+// TODO: Do something to test face coords handling
 
 #[test_resources("tests/fixtures/*.json")]
 fn test_session(resource: &str) {
