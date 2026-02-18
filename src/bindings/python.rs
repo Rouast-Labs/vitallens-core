@@ -6,11 +6,14 @@ use crate::signal;
 use crate::signal::rate::{RateBounds, RateStrategy};
 use crate::registry::HrvMetric;
 use crate::signal::peaks::{self, PeakOptions, SignalBounds};
+use crate::geometry::roi;
+use crate::types::{Rect, RoiMethod};
 
 pub fn register_functions(m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
+    m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     Ok(())
 }
 
@@ -109,4 +112,16 @@ fn find_peaks(
         .collect();
 
     Ok(peaks)
+}
+
+#[pyfunction]
+#[pyo3(signature = (face, method, container=None, force_even=false))]
+fn calculate_roi(
+    _py: Python,
+    face: Rect,
+    method: RoiMethod,
+    container: Option<(f32, f32)>,
+    force_even: bool
+) -> PyResult<Rect> {
+    Ok(roi::calculate_roi(face, method, container, force_even))
 }

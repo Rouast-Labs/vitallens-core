@@ -5,7 +5,7 @@ use serde::{Serialize, Deserialize};
 use pyo3::prelude::*;
 
 // --- CONFIG ---
-// Input/Config types get getters AND setters
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))] 
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -17,7 +17,24 @@ pub struct ModelConfig {
     pub roi_method: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+}
+
 // --- INPUTS ---
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -37,6 +54,7 @@ pub struct InputChunk {
 }
 
 // --- ENUMS ---
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
 pub enum WaveformMode {
@@ -67,8 +85,41 @@ impl<'source> FromPyObject<'source> for WaveformMode {
     }
 }
 
+// --- ROI CONFIGURATION ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
+pub enum RoiMethod {
+    Face,
+    Forehead,
+    UpperBody,
+    UpperBodyCropped,
+    Custom { 
+        left: f32, top: f32, right: f32, bottom: f32 
+    },
+}
+
+#[cfg(feature = "python")]
+impl<'source> FromPyObject<'source> for RoiMethod {
+    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+        if let Ok(s) = ob.extract::<String>() {
+            match s.as_str() {
+                "face" => Ok(RoiMethod::Face),
+                "forehead" => Ok(RoiMethod::Forehead),
+                "upper_body" => Ok(RoiMethod::UpperBody),
+                "upper_body_cropped" => Ok(RoiMethod::UpperBodyCropped),
+                _ => Err(pyo3::exceptions::PyValueError::new_err("Invalid RoiMethod string")),
+            }
+        } else if let Ok((l, t, r, b)) = ob.extract::<(f32, f32, f32, f32)>() {
+             Ok(RoiMethod::Custom { left: l, top: t, right: r, bottom: b })
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err("RoiMethod must be a string or tuple(l,t,r,b)"))
+        }
+    }
+}
+
 // --- OUTPUTS ---
-// Output types get getters only (read-only for Python users)
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -102,6 +153,7 @@ pub struct SessionResult {
 }
 
 // --- PYTHON CONSTRUCTORS ---
+
 #[cfg(feature = "python")]
 #[pymethods]
 impl ModelConfig {
@@ -131,5 +183,18 @@ impl InputChunk {
         face: Option<FaceInput>
     ) -> Self {
         Self { timestamp, signals, confidences, face }
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl Rect {
+    #[new]
+    fn py_new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Rect(x={:.2}, y={:.2}, w={:.2}, h={:.2})", self.x, self.y, self.width, self.height)
     }
 }

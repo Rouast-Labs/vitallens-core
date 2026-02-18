@@ -4,6 +4,7 @@ pub mod registry;
 pub mod signal;
 pub mod state;
 pub mod types;
+pub mod geometry;
 mod bindings;
 
 // --- TIER 1: STATEFUL SESSION (iOS, JS, Python Apps) ---
@@ -32,6 +33,7 @@ fn vitallens_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<types::SessionResult>()?;
     m.add_class::<types::SignalResult>()?;
     m.add_class::<types::FaceResult>()?;
+    m.add_class::<types::Rect>()?;
 
     // 3. Export the Stateless Math functions
     // This calls code inside src/bindings/python.rs
