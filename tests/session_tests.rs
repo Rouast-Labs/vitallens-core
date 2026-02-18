@@ -71,8 +71,6 @@ struct TestCase {
     input_confidence: Vec<f32>,
 }
 
-// TODO: Do something to test face coords handling
-
 #[test_resources("tests/fixtures/*.json")]
 fn test_session(resource: &str) {
     let path = Path::new(resource);
