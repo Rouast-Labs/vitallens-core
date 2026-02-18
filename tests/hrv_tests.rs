@@ -11,6 +11,8 @@ use vitallens_core::registry::{self, HrvMetric};
 const SDNN_TOLERANCE_MS: f32 = 5.0;
 const RMSSD_TOLERANCE_MS: f32 = 5.0;
 const LFHF_TOLERANCE: f32 = 0.5;
+const PNN50_TOLERANCE: f32 = 5.0;
+const SD1SD2_TOLERANCE: f32 = 0.05;
 const STRESS_INDEX_TOLERANCE: f32 = 20.0;
 
 #[derive(Deserialize, Debug)]
@@ -26,6 +28,8 @@ struct Vitals {
     hrv_sdnn: Option<ScalarResult>,
     hrv_rmssd: Option<ScalarResult>,
     hrv_lfhf: Option<ScalarResult>,
+    hrv_pnn50: Option<ScalarResult>,
+    hrv_sd1sd2: Option<ScalarResult>,
     stress_index: Option<ScalarResult>,
 }
 
@@ -248,6 +252,108 @@ fn verify_stress_index(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn verify_pnn50(
+    filename: &str,
+    fs: f32,
+    signal: &[f32], 
+    confidence_source: Option<&Vec<f32>>,
+    ground_truth_pnn50: f32,
+    rate_hint: Option<f32>
+) -> Result<(), String> {
+    
+    let meta_hr = registry::get_vital_meta("heart_rate").unwrap();
+    let deriv_hr = &meta_hr.derivations[0];
+    
+    let meta_pnn50 = registry::get_vital_meta("hrv_pnn50").unwrap();
+    let deriv_pnn50 = &meta_pnn50.derivations[0];
+
+    let duration_sec = signal.len() as f32 / fs;
+    if duration_sec < deriv_pnn50.min_window_seconds {
+        println!("[{}] pNN50 SKIPPED: Duration {:.1}s < Min Window {:.1}s", 
+            filename, duration_sec, deriv_pnn50.min_window_seconds);
+        return Ok(());
+    }
+
+    let confidence = confidence_source.cloned().unwrap_or_else(|| vec![1.0; signal.len()]);
+
+    let timestamps: Vec<f64> = (0..signal.len()).map(|i| i as f64 / fs as f64).collect();
+    let bounds = peaks::SignalBounds { 
+        min_rate: deriv_hr.min_value, 
+        max_rate: deriv_hr.max_value 
+    };
+
+    let (calculated, calc_conf) = hrv::estimate_hrv(
+        signal, fs, HrvMetric::Pnn50, &timestamps, &confidence, bounds, rate_hint
+    );
+
+    let diff = (calculated - ground_truth_pnn50).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
+    
+    println!("[{}] pNN50: Calc={:.2}% (Conf {:.2}), Ref={:.2}%, Diff={:.2}%", filename, calculated, calc_conf, ground_truth_pnn50, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] pNN50 Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
+
+    if diff <= PNN50_TOLERANCE {
+        Ok(())
+    } else {
+        Err(format!("[{}] pNN50 Mismatch. Expected {:.2}, Got {:.2} (Diff {:.2})", filename, ground_truth_pnn50, calculated, diff))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_sd1sd2(
+    filename: &str,
+    fs: f32,
+    signal: &[f32], 
+    confidence_source: Option<&Vec<f32>>,
+    ground_truth_ratio: f32,
+    rate_hint: Option<f32>
+) -> Result<(), String> {
+    
+    let meta_hr = registry::get_vital_meta("heart_rate").unwrap();
+    let deriv_hr = &meta_hr.derivations[0];
+    
+    let meta_s = registry::get_vital_meta("hrv_sd1sd2").unwrap();
+    let deriv_s = &meta_s.derivations[0];
+
+    let duration_sec = signal.len() as f32 / fs;
+    if duration_sec < deriv_s.min_window_seconds {
+        println!("[{}] SD1/SD2 SKIPPED: Duration {:.1}s < Min Window {:.1}s", 
+            filename, duration_sec, deriv_s.min_window_seconds);
+        return Ok(());
+    }
+
+    let confidence = confidence_source.cloned().unwrap_or_else(|| vec![1.0; signal.len()]);
+
+    let timestamps: Vec<f64> = (0..signal.len()).map(|i| i as f64 / fs as f64).collect();
+    let bounds = peaks::SignalBounds { 
+        min_rate: deriv_hr.min_value, 
+        max_rate: deriv_hr.max_value 
+    };
+
+    let (calculated, calc_conf) = hrv::estimate_hrv(
+        signal, fs, HrvMetric::Sd1Sd2, &timestamps, &confidence, bounds, rate_hint
+    );
+
+    let diff = (calculated - ground_truth_ratio).abs();
+    let max_input_conf = confidence.iter().fold(0.0f32, |a, &b| a.max(b));
+    
+    println!("[{}] SD1/SD2: Calc={:.3} (Conf {:.2}), Ref={:.3}, Diff={:.3}", filename, calculated, calc_conf, ground_truth_ratio, diff);
+
+    if calc_conf < 0.0 || calc_conf > max_input_conf + f32::EPSILON {
+        return Err(format!("[{}] SD1/SD2 Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
+    }
+
+    if diff <= SD1SD2_TOLERANCE {
+        Ok(())
+    } else {
+        Err(format!("[{}] SD1/SD2 Mismatch. Expected {:.3}, Got {:.3} (Diff {:.3})", filename, ground_truth_ratio, calculated, diff))
+    }
+}
+
 // --- Main Test Runner ---
 
 #[test_resources("tests/fixtures/*.json")]
@@ -295,7 +401,25 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        // 4. Verify Stress Index
+        // 4. Verify pNN50
+        if let Some(pnn50_ref) = &ref_data.vital_signs.hrv_pnn50 {
+            if let Err(e) = verify_pnn50(
+                filename, fs, &ppg.data, ppg.confidence.as_ref(), pnn50_ref.value, rate_hint
+            ) {
+                failures.push(e);
+            }
+        }
+
+        // 5. Verify SD1/SD2
+        if let Some(sd1sd2_ref) = &ref_data.vital_signs.hrv_sd1sd2 {
+            if let Err(e) = verify_sd1sd2(
+                filename, fs, &ppg.data, ppg.confidence.as_ref(), sd1sd2_ref.value, rate_hint
+            ) {
+                failures.push(e);
+            }
+        }
+        
+        // 6. Verify Stress Index
         if let Some(si_ref) = &ref_data.vital_signs.stress_index {
             if let Err(e) = verify_stress_index(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), si_ref.value, rate_hint

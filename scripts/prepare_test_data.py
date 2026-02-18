@@ -115,7 +115,6 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
     if len(clean_rri_ms) < 2: return {}
 
     # 3. Reconstruct Timeline for NeuroKit
-    # We rebuild peaks from the CLEAN intervals so NK2 sees the exact filtered data.
     clean_peaks_ms = np.cumsum([0] + clean_rri_ms)
     metrics = {}
     
@@ -134,8 +133,8 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
             clean_peaks_ms, 
             sampling_rate=VIRTUAL_FS, 
             normalize=True,
-            interpolation_order=1, # Linear (Rust parity)
-            psd_method='fft'       # Periodogram (Rust parity)
+            interpolation_order=1,
+            psd_method='fft'
         )
         metrics['hrv_lfhf'] = fd['HRV_LFHF'].values[0]
     except Exception as e:
@@ -252,7 +251,7 @@ def main():
         conf_arr = wave.get("confidence")
         
         # PPG Settings
-        CONF_THRESH = 0.25 # Matches our lowered rust gating
+        CONF_THRESH = 0.5
         
         annotator = PeakAnnotator(
             wave["data"], fs, "PPG (Heart Rate)", 

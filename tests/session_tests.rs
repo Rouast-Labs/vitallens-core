@@ -13,7 +13,9 @@ const TOLERANCE_RR_BPM: f32 = 3.0;
 const TOLERANCE_SDNN_MS: f32 = 10.0;
 const TOLERANCE_RMSSD_MS: f32 = 10.0;
 const TOLERANCE_IE_RATIO: f32 = 0.15;
+const TOLERANCE_PNN50: f32 = 5.0;
 const TOLERANCE_LFHF: f32 = 0.5;
+const TOLERANCE_SD1SD2: f32 = 0.05;
 const TOLERANCE_STRESS_INDEX: f32 = 20.0;
 
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
@@ -33,6 +35,8 @@ struct Vitals {
     hrv_sdnn: Option<ScalarResult>,
     hrv_rmssd: Option<ScalarResult>,
     hrv_lfhf: Option<ScalarResult>,
+    hrv_pnn50: Option<ScalarResult>,
+    hrv_sd1sd2: Option<ScalarResult>,
     ie_ratio: Option<ScalarResult>,
     stress_index: Option<ScalarResult>,
 }
@@ -105,6 +109,8 @@ fn test_session(resource: &str) {
     add_case("hrv_sdnn", ref_data.vital_signs.hrv_sdnn.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SDNN_MS);
     add_case("hrv_rmssd", ref_data.vital_signs.hrv_rmssd.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_RMSSD_MS);
     add_case("hrv_lfhf", ref_data.vital_signs.hrv_lfhf.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_LFHF);
+    add_case("hrv_pnn50", ref_data.vital_signs.hrv_pnn50.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_PNN50);
+    add_case("hrv_sd1sd2", ref_data.vital_signs.hrv_sd1sd2.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SD1SD2);
     add_case("ie_ratio", ref_data.vital_signs.ie_ratio.as_ref(), ref_data.vital_signs.respiratory_waveform.as_ref(), "respiratory_waveform", TOLERANCE_IE_RATIO);
     add_case("stress_index", ref_data.vital_signs.stress_index.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_STRESS_INDEX);
 

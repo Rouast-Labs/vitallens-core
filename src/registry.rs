@@ -23,6 +23,8 @@ pub enum HrvMetric {
     Rmssd,
     LfHf,
     StressIndex,
+    Pnn50,
+    Sd1Sd2,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,9 +177,23 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             display_name: "Heart Rate Variability (RMSSD)".to_string(),
         }),
 
-        // HRV (pnn50)
-        // Min 30s
-        // Pre 60s
+        // HRV (pNN50)
+        "hrv_pnn50" | "pnn50" => Some(VitalMeta {
+            id: "hrv_pnn50".to_string(),
+            vital_type: VitalType::Derived,
+            derivations: vec![DerivationConfig {
+                source_signal: "ppg_waveform".to_string(),
+                method: CalculationMethod::HrvFromPeaks(HrvMetric::Pnn50),
+                min_window_seconds: 30.0,
+                preferred_window_seconds: 60.0,
+                min_value: 0.0,
+                max_value: 100.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "%".to_string(),
+            display_name: "Heart Rate Variability (pNN50)".to_string(),
+        }),
 
         // HRV (LF/HF)
         "hrv_lfhf" | "lfhf" => Some(VitalMeta {
@@ -198,9 +214,23 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
         }),
 
         // HRV (SD1/SD2)
-        // Min 55s
-        // Pre 120s
-
+        "hrv_sd1sd2" | "sd1sd2" => Some(VitalMeta {
+            id: "hrv_sd1sd2".to_string(),
+            vital_type: VitalType::Derived,
+            derivations: vec![DerivationConfig {
+                source_signal: "ppg_waveform".to_string(),
+                method: CalculationMethod::HrvFromPeaks(HrvMetric::Sd1Sd2),
+                min_window_seconds: 55.0,
+                preferred_window_seconds: 120.0,
+                min_value: 0.0,
+                max_value: 1.0,
+                order: 1,
+            }],
+            processing: None,
+            unit: "ratio".to_string(),
+            display_name: "Heart Rate Variability (SD1/SD2)".to_string(),
+        }),
+        
         // I:E Ratio
         "ie_ratio" | "resp_ie" => Some(VitalMeta {
             id: "ie_ratio".to_string(),

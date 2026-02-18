@@ -59,6 +59,8 @@ pub fn estimate_hrv(
         crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
         crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
         crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
+        crate::registry::HrvMetric::Pnn50 => calculate_pnn50(&intervals),
+        crate::registry::HrvMetric::Sd1Sd2 => calculate_sd1sd2(&intervals),
     };
 
     (value, min_conf)
@@ -231,6 +233,70 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
     if mo_sec <= 0.0 || mxdmn_sec <= 0.0 { return 0.0; }
 
     amo / (2.0 * mo_sec * mxdmn_sec)
+}
+
+/// Percentage of successive NN intervals that differ by more than 50 ms.
+pub fn calculate_pnn50(nn_intervals: &[f32]) -> f32 {
+    if nn_intervals.len() < 2 {
+        return 0.0;
+    }
+
+    let mut count_above_50 = 0;
+    let total_comparisons = nn_intervals.len() - 1;
+
+    for i in 0..total_comparisons {
+        let diff = (nn_intervals[i+1] - nn_intervals[i]).abs();
+        if diff > 50.0 {
+            count_above_50 += 1;
+        }
+    }
+
+    if total_comparisons > 0 {
+        (count_above_50 as f32 / total_comparisons as f32) * 100.0
+    } else {
+        0.0
+    }
+}
+
+/// Calculates the ratio of SD1 (short-term) to SD2 (long-term) variability.
+pub fn calculate_sd1sd2(nn_intervals: &[f32]) -> f32 {
+    if nn_intervals.len() < 3 {
+        return 0.0;
+    }
+
+    let mut diff_sq_sum = 0.0;
+    let mut sum_sq_sum = 0.0;
+    let mut diff_sum = 0.0;
+    let mut sum_sum = 0.0;
+    
+    let n = (nn_intervals.len() - 1) as f32;
+
+    for i in 0..nn_intervals.len() - 1 {
+        let x_i = nn_intervals[i];
+        let x_next = nn_intervals[i+1];
+
+        // Perpendicular (SD1 component)
+        let v_perp = (x_next - x_i) / std::f32::consts::SQRT_2;
+        diff_sum += v_perp;
+        diff_sq_sum += v_perp * v_perp;
+
+        // Along identity (SD2 component)
+        let v_along = (x_next + x_i) / std::f32::consts::SQRT_2;
+        sum_sum += v_along;
+        sum_sq_sum += v_along * v_along;
+    }
+    
+    let var_sd1 = (diff_sq_sum / n) - (diff_sum / n).powi(2);
+    let var_sd2 = (sum_sq_sum / n) - (sum_sum / n).powi(2);
+
+    let sd1 = var_sd1.sqrt();
+    let sd2 = var_sd2.sqrt();
+
+    if sd2 > 1e-6 {
+        sd1 / sd2
+    } else {
+        0.0
+    }
 }
 
 // --- Helpers ---
@@ -659,5 +725,45 @@ mod tests {
         // Mo should be ~1.025s
         // SI = 83.3 / (2 * 1.025 * 0.2) = ~203
         assert!(si > 190.0 && si < 220.0, "Expected SI ~203, got {}", si);
+    }
+
+    #[test]
+    fn test_calculate_pnn50() {
+        // Case 1: No differences > 50ms (pNN50 = 0%)
+        let stable = vec![800.0, 810.0, 805.0, 820.0]; 
+        assert_eq!(calculate_pnn50(&stable), 0.0);
+
+        // Case 2: All differences > 50ms (pNN50 = 100%)
+        let unstable = vec![800.0, 900.0, 800.0, 900.0];
+        assert_eq!(calculate_pnn50(&unstable), 100.0);
+
+        // Case 3: Mixed (1 out of 3 diffs > 50ms -> 33.33%)
+        // Diffs: |800-810|=10, |810-900|=90 (>50), |900-910|=10
+        let mixed = vec![800.0, 810.0, 900.0, 910.0];
+        let pnn50 = calculate_pnn50(&mixed);
+        assert!((pnn50 - 33.333).abs() < 0.01, "Expected ~33.33, got {}", pnn50);
+    }
+
+    #[test]
+    fn test_calculate_sd1sd2() {
+        // Case 1: Perfect line (x_next = x_i) -> SD1 should be 0.
+        let linear = vec![1000.0, 1000.0, 1000.0, 1000.0];
+        assert_eq!(calculate_sd1sd2(&linear), 0.0);
+
+        // Case 2: High short term variation
+        // 1000, 800, 1000, 800
+        // Diffs: -200, 200, -200 -> High SD1
+        // Sums: 1800, 1800, 1800 -> Low SD2 (variance of sums is 0)
+        let alternating = vec![1000.0, 800.0, 1000.0, 800.0];
+        assert_eq!(calculate_sd1sd2(&alternating), 0.0); 
+
+        // Case 3: Balanced (Smoother sine-like wave)
+        // Diffs are small (10-20ms), Sums vary more (1600-1640)
+        // This guarantees SD2 > SD1, so ratio < 1.0
+        let data = vec![800.0, 810.0, 820.0, 810.0, 800.0];
+        let ratio = calculate_sd1sd2(&data);
+        
+        assert!(ratio > 0.0);
+        assert!(ratio < 1.0, "Expected SD1 < SD2 for smooth rhythm, got ratio {}", ratio);
     }
 }

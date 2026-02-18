@@ -38,10 +38,12 @@ fn estimate_hrv_metric(
     let conf = confidence.as_slice()?;
     
     let metric = match metric_name.to_lowercase().as_str() {
-        "sdnn" => HrvMetric::Sdnn,
-        "rmssd" => HrvMetric::Rmssd,
-        "lfhf" => HrvMetric::LfHf,
+        "sdnn" | "hrv_sdnn" => HrvMetric::Sdnn,
+        "rmssd" | "hrv_rmssd" => HrvMetric::Rmssd,
+        "lfhf" | "hrv_lfhf" => HrvMetric::LfHf,
         "si" | "stress_index" => HrvMetric::StressIndex,
+        "pnn50" | "hrv_pnn50" => HrvMetric::Pnn50,
+        "sd1sd2" | "hrv_sd1sd2" => HrvMetric::Sd1Sd2,
         _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid HRV metric")),
     };
 
