@@ -7,6 +7,7 @@ use test_generator::test_resources;
 
 use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
 use vitallens_core::registry;
+use vitallens_core::types::FaceInput;
 
 const TOLERANCE_HR_BPM: f32 = 3.0;
 const TOLERANCE_RR_BPM: f32 = 3.0;
@@ -21,8 +22,15 @@ const TOLERANCE_STRESS_INDEX: f32 = 20.0;
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
 
 #[derive(Deserialize, Debug)]
+struct FaceRef {
+    coordinates: Vec<Vec<f32>>,
+    confidence: Vec<f32>,
+}
+
+#[derive(Deserialize, Debug)]
 struct ReferenceData {
     vital_signs: Vitals,
+    face: Option<FaceRef>,
     fps: f32, 
 }
 
@@ -270,14 +278,49 @@ fn run_session_extraction(
             }
         }
 
+        let face_input = if let Some(face_ref) = &ref_data.face {
+            if start < face_ref.coordinates.len() {
+                Some(FaceInput {
+                    coordinates: face_ref.coordinates[start].clone(),
+                    confidence: face_ref.confidence[start],
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let chunk = InputChunk {
             timestamp: ts_slice.to_vec(),
             signals: signal_map,
             confidences: confidence_map,
-            face: None,
+            face: face_input,
         };
 
         let result = session.process_chunk(chunk, mode.clone());
+
+        if ref_data.face.is_some() {
+            if let Some(face_res) = &result.face {
+                if matches!(mode, WaveformMode::Global) {
+                     assert_eq!(
+                        face_res.coordinates.len(), 
+                        result.timestamp.len(), 
+                        "Face result length mismatch in Global mode"
+                    );
+                }
+                
+                if let Some(last_coords) = face_res.coordinates.last() {
+                     let input_coords = &ref_data.face.as_ref().unwrap().coordinates[start];
+                     if !last_coords.is_empty() && !input_coords.is_empty() {
+                         assert!((last_coords[0] - input_coords[0]).abs() < 1.0, 
+                             "Face coordinate drift detected: Input {:?} vs Output {:?}", input_coords, last_coords);
+                     }
+                }
+            } else {
+                panic!("Session failed to return FaceResult despite valid FaceInput provided.");
+            }
+        }
 
         for (key, val) in result.signals {
             let entry = waveform_results.entry(key.clone()).or_insert((Vec::new(), Vec::new()));
