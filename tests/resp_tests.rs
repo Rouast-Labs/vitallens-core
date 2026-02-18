@@ -19,7 +19,7 @@ fn init_logger() {
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
     vital_signs: Vitals,
-    fs: f32, 
+    fps: f32, 
 }
 
 #[derive(Deserialize, Debug)]
@@ -53,7 +53,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
     if let (Some(gt), Some(resp)) = (ref_data.vital_signs.ie_ratio, ref_data.vital_signs.respiratory_waveform) {
         let meta = registry::get_vital_meta("ie_ratio").unwrap();
         let min_win = meta.derivations[0].min_window_seconds;
-        let duration_sec = resp.data.len() as f32 / ref_data.fs;
+        let duration_sec = resp.data.len() as f32 / ref_data.fps;
 
         if duration_sec < min_win {
             println!(" [SKIP] {} - insufficient duration ({:.1}s < {:.1}s)", filename, duration_sec, min_win);
@@ -68,7 +68,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
             // The Session sorts execution by dependency order, so Rate will be calc'd first
             // and passed as a hint to I:E Ratio.
             supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
-            fps_target: ref_data.fs,
+            fps_target: ref_data.fps,
             input_size: 30,
             roi_method: "face".to_string(),
         };
@@ -77,7 +77,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
         let conf = resp.confidence.unwrap_or_else(|| vec![1.0; resp.data.len()]);
 
         let chunk = InputChunk {
-            timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fs as f64).collect(),
+            timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fps as f64).collect(),
             signals: [("respiratory_waveform".to_string(), resp.data)].into(),
             confidences: [("respiratory_waveform".to_string(), conf)].into(),
             face: None,

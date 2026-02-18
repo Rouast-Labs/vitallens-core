@@ -5,15 +5,15 @@ use numpy::PyReadonlyArray1;
 use crate::signal;
 use crate::signal::rate::{RateBounds, RateStrategy};
 use crate::registry::HrvMetric;
-use crate::signal::peaks::SignalBounds;
+use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 
 pub fn register_functions(m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
-    m.add_function(wrap_pyfunction!(estimate_hrv_sdnn, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
+    m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     Ok(())
 }
 
-/// Tier 2: Stateless Heart Rate Estimation
 #[pyfunction]
 fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
@@ -25,23 +25,86 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
     Ok((res.value, res.confidence))
 }
 
-/// Tier 2: Stateless SDNN
 #[pyfunction]
-fn estimate_hrv_sdnn(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
+fn estimate_hrv_metric(
+    _py: Python,
+    signal: PyReadonlyArray1<f32>,
+    fs: f32,
+    metric_name: &str,
+    confidence: PyReadonlyArray1<f32>,
+    rate_hint: Option<f32>,
+) -> PyResult<(f32, f32)> {
     let s = signal.as_slice()?;
+    let conf = confidence.as_slice()?;
     
-    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
-    let rate_hint = None;
+    let metric = match metric_name.to_lowercase().as_str() {
+        "sdnn" => HrvMetric::Sdnn,
+        "rmssd" => HrvMetric::Rmssd,
+        "lfhf" => HrvMetric::LfHf,
+        "si" | "stress_index" => HrvMetric::StressIndex,
+        _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid HRV metric")),
+    };
 
-    let (val, conf) = signal::estimate_hrv(
+    let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
+    
+    let (val, conf_out) = signal::estimate_hrv(
         s, 
         fs, 
-        HrvMetric::Sdnn, 
+        metric, 
         &[], 
-        &[], 
+        conf, 
         bounds, 
         rate_hint
     );
     
-    Ok((val, conf))
+    Ok((val, conf_out))
+}
+
+#[pyfunction]
+#[pyo3(signature = (
+    signal, 
+    fs, 
+    refine, 
+    rate_hint=None,
+    min_rate=40.0,
+    max_rate=220.0,
+    detection_threshold=0.45,
+    window_cycles=2.5,
+    max_rate_change=1.0
+))]
+#[allow(clippy::too_many_arguments)]
+fn find_peaks(
+    _py: Python, 
+    signal: PyReadonlyArray1<f32>, 
+    fs: f32, 
+    refine: bool,
+    rate_hint: Option<f32>,
+    min_rate: f32,
+    max_rate: f32,
+    detection_threshold: f32,
+    window_cycles: f32,
+    max_rate_change: f32,
+) -> PyResult<Vec<f32>> {
+    let s = signal.as_slice()?;
+    
+    let options = PeakOptions {
+        fs,
+        bounds: SignalBounds { min_rate, max_rate },
+        threshold: detection_threshold,
+        window_cycles,
+        max_rate_change_per_sec: max_rate_change,
+        refine,
+        smooth_input: true,
+        avg_rate_hint: rate_hint,
+        ..Default::default()
+    };
+
+    let segments = peaks::find_peaks(s, options);
+
+    let peaks: Vec<f32> = segments.into_iter()
+        .flat_map(|seg| seg.into_iter())
+        .map(|p| p.x)
+        .collect();
+
+    Ok(peaks)
 }

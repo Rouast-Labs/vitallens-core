@@ -13,7 +13,7 @@ const RATE_TOLERANCE_BPM: f32 = 3.0;
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
     vital_signs: Vitals,
-    fs: f32, 
+    fps: f32, 
 }
 
 #[derive(Deserialize, Debug)]
@@ -121,7 +121,7 @@ fn test_rate_integrity(resource: &str) {
     
     let ref_data: ReferenceData = serde_json::from_reader(reader)
         .expect("Failed to parse JSON.");
-    let fs = ref_data.fs;
+    let fs = ref_data.fps;
     
     let mut failures = Vec::new();
 

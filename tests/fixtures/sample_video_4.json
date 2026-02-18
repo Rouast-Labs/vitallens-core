@@ -13433,30 +13433,6 @@
         "note": "Face detection coordinates for this face with live confidence levels."
     },
     "vital_signs": {
-        "hrv_lfhf": {
-            "value": 0.7,
-            "unit": "unitless",
-            "confidence": 0.9604,
-            "note": "Global estimate of Heart Rate Variability (LF/HF) using vitallens-2.0, with confidence level."
-        },
-        "respiratory_rate": {
-            "value": 17.0,
-            "unit": "bpm",
-            "confidence": 0.9978,
-            "note": "Global estimate of Respiratory Rate using vitallens-2.0, with confidence level."
-        },
-        "heart_rate": {
-            "value": 45.5,
-            "unit": "bpm",
-            "confidence": 0.9136,
-            "note": "Global estimate of Heart Rate using vitallens-2.0, with confidence level."
-        },
-        "hrv_sdnn": {
-            "value": 75.0,
-            "unit": "ms",
-            "confidence": 0.9604,
-            "note": "Global estimate of Heart Rate Variability (SDNN) using vitallens-2.0, with confidence level."
-        },
         "respiratory_waveform": {
             "data": [
                 -0.1356,
@@ -21216,26 +21192,61 @@
                 1892
             ]
         },
+        "hrv_lfhf": {
+            "value": 0.3,
+            "unit": "unitless",
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "respiratory_rate": {
+            "value": 17.0,
+            "unit": "bpm",
+            "confidence": 0.9978,
+            "note": "Legacy Verified (FFT-based)"
+        },
         "hrv_rmssd": {
-            "value": 103.0,
+            "value": 101.77,
             "unit": "ms",
-            "confidence": 0.9604,
-            "note": "Global estimate of Heart Rate Variability (RMSSD) using vitallens-2.0, with confidence level."
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "heart_rate": {
+            "value": 45.5,
+            "unit": "bpm",
+            "confidence": 0.9136,
+            "note": "Legacy Verified (FFT-based)"
+        },
+        "hrv_sdnn": {
+            "value": 73.36,
+            "unit": "ms",
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "stress_index": {
+            "value": 49.32,
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "hrv_pnn50": {
+            "value": 60.42,
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "hrv_sd1sd2": {
+            "value": 0.97,
+            "confidence": 0.96,
+            "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {
 			"value": 0.6485,
             "unit": "ratio",
             "confidence": 1.0,
-            "note": "Global estimate of I:E Ratio using VitalLens API"
-		},
-        "stress_index": {
-			"value": 40.0,
-            "unit": "SI",
-            "confidence": 0.9604,
-            "note": "Global estimate of Stress Index using VitalLens API"
+            "note": "Ground Truth (Manual)."
 		}
     },
-    "fs": 30.0,
-    "source": "g.mov",
-    "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes."
+    "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.",
+    "fps": 30.00312858483679,
+    "n": 1918,
+    "model_used": "vitallens-2.0",
+    "source": "g.mov"
 }

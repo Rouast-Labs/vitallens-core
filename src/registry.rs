@@ -147,7 +147,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Sdnn),
                 min_window_seconds: 20.0,
-                preferred_window_seconds: 60.0,
+                preferred_window_seconds: 120.0,
                 min_value: 1.0,
                 max_value: 200.0,
                 order: 1,
@@ -175,6 +175,10 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             display_name: "Heart Rate Variability (RMSSD)".to_string(),
         }),
 
+        // HRV (pnn50)
+        // Min 30s
+        // Pre 60s
+
         // HRV (LF/HF)
         "hrv_lfhf" | "lfhf" => Some(VitalMeta {
             id: "hrv_lfhf".to_string(),
@@ -192,6 +196,10 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             unit: "ratio".to_string(),
             display_name: "Heart Rate Variability (LF/HF)".to_string(),
         }),
+
+        // HRV (SD1/SD2)
+        // Min 55s
+        // Pre 120s
 
         // I:E Ratio
         "ie_ratio" | "resp_ie" => Some(VitalMeta {
@@ -218,8 +226,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 source_signal: "ppg_waveform".to_string(),
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::StressIndex),
-                min_window_seconds: 30.0,
-                preferred_window_seconds: 60.0,
+                min_window_seconds: 55.0,
+                preferred_window_seconds: 120.0,
                 min_value: 0.0,
                 max_value: 1000.0,
                 order: 1,

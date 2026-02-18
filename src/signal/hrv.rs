@@ -32,7 +32,8 @@ pub fn estimate_hrv(
         fs,
         bounds,
         avg_rate_hint: rate_hint,
-        threshold: 0.5,
+        threshold: 0.45,
+        window_cycles: 2.5,
         max_rate_change_per_sec: 1.0,
         refine: true,
         smooth_input: true,
@@ -252,29 +253,48 @@ fn resolve_time(p: &Peak, timestamps: &[f64], fs_fallback: f32) -> f64 {
     }
 }
 
-fn filter_outliers(intervals: &[f32], threshold: f32) -> Vec<f32> {
-    if intervals.len() < 3 {
+fn filter_outliers(intervals: &[f32], _threshold: f32) -> Vec<f32> {
+    if intervals.len() < 2 {
         return intervals.to_vec();
     }
 
-    let mut sorted = intervals.to_vec();
-    // sort_by handles NaNs safely by pushing them to the end or panicking (we assume no NaNs here)
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    const MIN_RR: f32 = 300.0;
+    const MAX_RR: f32 = 2000.0;
+    const MAX_REL_CHANGE: f32 = 0.25;
 
-    let mid = sorted.len() / 2;
-    let median = if sorted.len() % 2 == 0 {
-        (sorted[mid - 1] + sorted[mid]) / 2.0
-    } else {
-        sorted[mid]
-    };
-
-    let lower_bound = median * (1.0 - threshold);
-    let upper_bound = median * (1.0 + threshold);
-
-    intervals.iter()
-        .filter(|&&x| x >= lower_bound && x <= upper_bound)
+    // 1. Pre-filter absolute range limits & Calculate Median
+    let mut valid_range_intervals: Vec<f32> = intervals.iter()
         .cloned()
-        .collect()
+        .filter(|&x| x >= MIN_RR && x <= MAX_RR)
+        .collect();
+
+    if valid_range_intervals.is_empty() {
+        return Vec::new();
+    }
+
+    valid_range_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = valid_range_intervals.len() / 2;
+    let median = valid_range_intervals[mid];
+
+    // 2. Sequential Filter seeded by Median
+    let mut filtered = Vec::with_capacity(intervals.len());
+    let mut last_accepted = median; 
+
+    for &curr in intervals {
+        if curr < MIN_RR || curr > MAX_RR {
+            continue;
+        }
+
+        let diff = (curr - last_accepted).abs();
+        if diff > last_accepted * MAX_REL_CHANGE {
+            continue;
+        }
+
+        filtered.push(curr);
+        last_accepted = curr;
+    }
+
+    filtered
 }
 
 /// Resamples unevenly spaced NN intervals to a constant 4Hz time-series.

@@ -16,7 +16,7 @@ const MATCHING_TOLERANCE_RESP: i32 = 3;
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
     vital_signs: Vitals,
-    fs: f32, 
+    fps: f32, 
 }
 
 #[derive(Deserialize, Debug)]
@@ -164,7 +164,7 @@ fn test_data_integrity(resource: &str) {
     
     let ref_data: ReferenceData = serde_json::from_reader(reader)
         .expect("Failed to parse JSON. Ensure format matches ReferenceData struct.");
-    let fs = ref_data.fs;
+    let fs = ref_data.fps;
     
     let mut failures = Vec::new();
 
