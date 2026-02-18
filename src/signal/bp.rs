@@ -55,6 +55,34 @@ pub fn extract_pulse_pressure(signal: &[f32], fs: f32, confidence: &[f32]) -> (f
     }
 }
 
+pub fn calculate_map_from_signals(sbp: &[f32], dbp: &[f32]) -> (f32, f32) {
+    let len = sbp.len().min(dbp.len());
+    if len == 0 { return (0.0, 0.0); }
+
+    let mut sum_map = 0.0;
+    
+    for i in 0..len {
+        let val = (sbp[i] + 2.0 * dbp[i]) / 3.0;
+        sum_map += val;
+    }
+
+    (sum_map / len as f32, 1.0) 
+}
+
+pub fn calculate_pp_from_signals(sbp: &[f32], dbp: &[f32]) -> (f32, f32) {
+    let len = sbp.len().min(dbp.len());
+    if len == 0 { return (0.0, 0.0); }
+
+    let mut sum_pp = 0.0;
+    
+    for i in 0..len {
+        let val = sbp[i] - dbp[i];
+        sum_pp += val;
+    }
+
+    (sum_pp / len as f32, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

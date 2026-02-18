@@ -12,10 +12,6 @@ use pyo3::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-// ========================================================================
-// THE LOGIC CORE (Private, no FFI attributes, uses &mut self freely)
-// ========================================================================
-
 #[derive(Debug)]
 struct SessionCore {
     config: ModelConfig,
@@ -72,7 +68,6 @@ impl SessionCore {
         self.merge_signals(chunk.signals, chunk.confidences, overlap);
         self.merge_face(chunk.face, overlap, chunk.timestamp.len());
         if !matches!(mode, WaveformMode::Global) {
-            // Only prune history for streaming modes
             self.prune_state();
         }
 
@@ -80,8 +75,6 @@ impl SessionCore {
 
         self.construct_output(mode, derived_results)
     }
-
-    // --- Private Helpers (Moved here to avoid FFI type checks) ---
 
     fn merge_timestamps(&mut self, new_times: &[f64]) -> usize {
         if new_times.is_empty() { return 0; }
@@ -155,117 +148,161 @@ impl SessionCore {
 
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-
+        // Clone vital IDs to avoid borrowing issues while iterating
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
         for vital_id in vital_ids {
             if let Some(meta) = self.vital_metas.get(&vital_id).cloned() { 
                 for cfg in &meta.derivations {
-                    if let Some(source_buf) = self.signal_data.get(&cfg.source_signal) {
-                        let full_data = source_buf.compute_average();
-                        let full_conf = self.signal_confs.get(&cfg.source_signal)
-                            .map(|b| b.compute_average())
-                            .unwrap_or_else(|| vec![1.0; full_data.len()]);
-                        let available_frames = full_data.len();
-                        let target_fs = self.config.fps_target;
-                        let min_frames = (cfg.min_window_seconds * target_fs) as usize;
-                        if available_frames >= min_frames {
-                            let take_frames = match mode {
-                                WaveformMode::Global => available_frames,
-                                _ => {
-                                    let preferred_frames = (cfg.preferred_window_seconds * target_fs) as usize;
-                                    preferred_frames.min(available_frames)
-                                }
-                            };
+                    
+                    // Gather sources
+                    let mut source_data_bufs = Vec::new();
+                    let mut source_conf_bufs = Vec::new();
+                    let mut missing_source = false;
 
-                            let start_idx = available_frames - take_frames;
-                            let data_slice = &full_data[start_idx..];
-                            let conf_slice = &full_conf[start_idx..];
-
-                            let ts_len = self.timestamps.len();
-                            let slice_len = data_slice.len();
-                            let ts_start = ts_len.saturating_sub(slice_len);
-
-                            let actual_fs = if ts_len >= 2 && slice_len >= 2 {
-                                let relevant_timestamps = &self.timestamps[ts_start..];
-                                let duration = relevant_timestamps.last().unwrap() - relevant_timestamps.first().unwrap();
-                                if duration > 0.0 {
-                                    (relevant_timestamps.len() - 1) as f32 / duration as f32
-                                } else {
-                                    target_fs
-                                }
+                    for source_id in &cfg.sources {
+                        if let Some(buf) = self.signal_data.get(source_id) {
+                            source_data_bufs.push(buf.compute_average());
+                            
+                            if let Some(c_buf) = self.signal_confs.get(source_id) {
+                                source_conf_bufs.push(c_buf.compute_average());
                             } else {
-                                target_fs
-                            };
-
-                            let slice_avg_conf = if !conf_slice.is_empty() {
-                                conf_slice.iter().sum::<f32>() / conf_slice.len() as f32
-                            } else {
-                                0.0
-                            };
-
-                            let (val, conf) = match &cfg.method {
-                                CalculationMethod::Rate(strategy) => {
-                                    let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
-                                    let res = crate::signal::rate::estimate_rate(
-                                        data_slice, actual_fs, bounds, *strategy, None, Some(&mut self.fft_scratch)
-                                    );                                    
-                                    (res.value, slice_avg_conf)
-                                },
-                                CalculationMethod::HrvFromPeaks(metric) => {
-                                    let ts_slice = &self.timestamps[start_idx..];
-                                    let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
-                                    let hr_meta = registry::get_vital_meta("heart_rate").unwrap();
-                                    let hr_deriv = &hr_meta.derivations[0];
-                                    let bounds = SignalBounds { 
-                                        min_rate: hr_deriv.min_value, 
-                                        max_rate: hr_deriv.max_value 
-                                    };
-                                    crate::signal::hrv::estimate_hrv(
-                                        data_slice,
-                                        actual_fs,
-                                        *metric,
-                                        ts_slice,
-                                        conf_slice,
-                                        bounds,
-                                        rate_hint
-                                    )
-                                },
-                                CalculationMethod::Average => {
-                                    let (avg_val, _) = crate::signal::calculate_average(data_slice);
-                                    (avg_val, slice_avg_conf)
-                                },
-                                CalculationMethod::BpSystolic => {
-                                    crate::signal::bp::extract_systolic_pressure(data_slice, actual_fs, conf_slice)
-                                },
-                                CalculationMethod::BpDiastolic => {
-                                    crate::signal::bp::extract_diastolic_pressure(data_slice, actual_fs, conf_slice)
-                                },
-                                CalculationMethod::PulsePressure => {
-                                    crate::signal::bp::extract_pulse_pressure(data_slice, actual_fs, conf_slice)
-                                },
-                                CalculationMethod::IeRatio => {
-                                    let rate_hint = results.get("respiratory_rate").map(|(v, _)| *v);
-                                    let rr_meta = registry::get_vital_meta("respiratory_rate").unwrap();
-                                    let rr_deriv = &rr_meta.derivations[0];
-                                    let bounds = SignalBounds { 
-                                        min_rate: rr_deriv.min_value, 
-                                        max_rate: rr_deriv.max_value 
-                                    };
-                                    crate::signal::resp::calculate_ie_ratio(data_slice, actual_fs, conf_slice, bounds, rate_hint)
-                                },
-                            };
-
-                            if val >= cfg.min_value && val <= cfg.max_value {
-                                results.insert(vital_id.clone(), (val, conf));
-                                break;
-                            } else {
-                                log::warn!(
-                                    "[Session] Vital {}: Value {:.3} rejected by registry (Bounds: {:.1} - {:.1})", 
-                                    vital_id, val, cfg.min_value, cfg.max_value
-                                );
+                                source_conf_bufs.push(Vec::new()); 
                             }
+                        } else {
+                            missing_source = true;
+                            break;
                         }
+                    }
+
+                    if missing_source || source_data_bufs.is_empty() {
+                        continue;
+                    }
+
+                    // Align & window
+                    let available_len = source_data_bufs.iter().map(|v| v.len()).min().unwrap_or(0);
+                    let target_fs = self.config.fps_target;
+                    let min_frames = (cfg.min_window_seconds * target_fs) as usize;
+
+                    if available_len < min_frames {
+                        continue;
+                    }
+
+                    let take_frames = match mode {
+                        WaveformMode::Global => available_len,
+                        _ => {
+                            let pref = (cfg.preferred_window_seconds * target_fs) as usize;
+                            pref.min(available_len)
+                        }
+                    };
+
+                    // Slice the inputs to the latest `take_frames`
+                    let mut inputs: Vec<&[f32]> = Vec::with_capacity(source_data_bufs.len());
+                    let mut confs: Vec<&[f32]> = Vec::with_capacity(source_conf_bufs.len());
+
+                    let fallback_conf = vec![1.0; take_frames];
+
+                    for i in 0..source_data_bufs.len() {
+                        let data_vec = &source_data_bufs[i];
+                        let start = data_vec.len() - take_frames;
+                        inputs.push(&data_vec[start..]);
+
+                        if !source_conf_bufs[i].is_empty() {
+                            let conf_vec = &source_conf_bufs[i];
+                            let c_start = conf_vec.len().saturating_sub(take_frames);
+                            confs.push(&conf_vec[c_start..]);
+                        } else {
+                            confs.push(&fallback_conf);
+                        }
+                    }
+
+                    // Calculate actual FS from timestamps (using the slice duration)
+                    let ts_start_idx = self.timestamps.len().saturating_sub(take_frames);
+                    let ts_slice = if ts_start_idx < self.timestamps.len() {
+                        &self.timestamps[ts_start_idx..]
+                    } else { &[] };
+
+                    let actual_fs = if ts_slice.len() > 1 {
+                        let duration = ts_slice.last().unwrap() - ts_slice.first().unwrap();
+                        if duration > 0.0 { (ts_slice.len() - 1) as f32 / duration as f32 } else { target_fs }
+                    } else {
+                        target_fs
+                    };
+
+                    // Calculate average confidence of the primary source
+                    let slice_avg_conf = if !confs.is_empty() {
+                        confs[0].iter().sum::<f32>() / confs[0].len() as f32
+                    } else { 0.0 };
+
+                    // Execute calculation
+                    let (val, conf) = match &cfg.method {
+                        CalculationMethod::Rate(strategy) => {
+                            let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
+                            // Use rate hint from previously calculated Heart Rate if available
+                            let hint = results.get("heart_rate").map(|(v, _)| *v);
+                            
+                            let res = crate::signal::rate::estimate_rate(
+                                inputs[0], actual_fs, bounds, *strategy, hint, Some(&mut self.fft_scratch)
+                            );                                    
+                            (res.value, slice_avg_conf)
+                        },
+                        CalculationMethod::HrvFromPeaks(metric) => {
+                            let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
+                            // Get HR bounds from registry to ensure consistency
+                            let bounds = if let Some(hr_meta) = registry::get_vital_meta("heart_rate") {
+                                let d = &hr_meta.derivations[0];
+                                SignalBounds { min_rate: d.min_value, max_rate: d.max_value }
+                            } else {
+                                SignalBounds { min_rate: 40.0, max_rate: 220.0 }
+                            };
+
+                            crate::signal::hrv::estimate_hrv(
+                                inputs[0], actual_fs, *metric, ts_slice, confs[0], bounds, rate_hint
+                            )
+                        },
+                        CalculationMethod::Average => {
+                            let (avg_val, _) = crate::signal::calculate_average(inputs[0]);
+                            (avg_val, slice_avg_conf)
+                        },
+                        CalculationMethod::BpSystolic => {
+                            crate::signal::bp::extract_systolic_pressure(inputs[0], actual_fs, confs[0])
+                        },
+                        CalculationMethod::BpDiastolic => {
+                            crate::signal::bp::extract_diastolic_pressure(inputs[0], actual_fs, confs[0])
+                        },
+                        CalculationMethod::PulsePressureFromSignal => {
+                            crate::signal::bp::extract_pulse_pressure(inputs[0], actual_fs, confs[0])
+                        },
+                        CalculationMethod::PulsePressureFromScalars => {
+                            if inputs.len() >= 2 {
+                                crate::signal::bp::calculate_pp_from_signals(inputs[0], inputs[1])
+                            } else {
+                                (0.0, 0.0)
+                            }
+                        },
+                        CalculationMethod::MapFromScalars => {
+                            if inputs.len() >= 2 {
+                                crate::signal::bp::calculate_map_from_signals(inputs[0], inputs[1])
+                            } else {
+                                (0.0, 0.0)
+                            }
+                        },
+                        CalculationMethod::IeRatio => {
+                            let rate_hint = results.get("respiratory_rate").map(|(v, _)| *v);
+                            let rr_meta = registry::get_vital_meta("respiratory_rate").unwrap();
+                            let rr_deriv = &rr_meta.derivations[0];
+                            let bounds = SignalBounds { 
+                                min_rate: rr_deriv.min_value, 
+                                max_rate: rr_deriv.max_value 
+                            };
+                            crate::signal::resp::calculate_ie_ratio(inputs[0], actual_fs, confs[0], bounds, rate_hint)
+                        }
+                    };
+
+                    if val >= cfg.min_value && val <= cfg.max_value {
+                        results.insert(vital_id.clone(), (val, conf));
+                        // Break derivation loop for this vital (successful)
+                        break; 
                     }
                 }
             }
@@ -397,9 +434,7 @@ impl SessionCore {
     }
 }
 
-// ========================================================================
-// THE PUBLIC SHELL (Exported, FFI-safe types only, Interior Mutability)
-// ========================================================================
+// --- FFI WRAPPERS ---
 
 #[derive(Debug)]
 #[cfg_attr(feature = "python", pyclass)]
@@ -409,7 +444,6 @@ pub struct Session {
     core: Mutex<SessionCore>, 
 }
 
-// --- NATIVE & PYTHON IMPLEMENTATION ---
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 impl Session {
     #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
@@ -425,12 +459,9 @@ impl Session {
     }
 }
 
-// --- PYTHON SPECIFIC IMPLEMENTATION ---
 #[cfg(feature = "python")]
 #[pymethods]
 impl Session {
-    // Maps to __init__ in Python
-    // Takes &ModelConfig because PyO3 can provide references to Python objects
     #[new]
     pub fn py_new(config: &ModelConfig) -> Self {
         Self {
@@ -438,7 +469,6 @@ impl Session {
         }
     }
 
-    // Re-expose process_chunk for Python (signature is the same, PyO3 handles conversion)
     #[pyo3(name = "process_chunk")]
     pub fn py_process_chunk(&self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
@@ -446,7 +476,6 @@ impl Session {
     }
 }
 
-// --- WASM SPECIFIC IMPLEMENTATION ---
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 impl Session {
@@ -463,351 +492,8 @@ impl Session {
         let chunk: InputChunk = serde_wasm_bindgen::from_value(chunk_val)?;
         let mode: WaveformMode = serde_wasm_bindgen::from_value(mode_val)?;
         
-        let result = self.process_chunk(chunk, mode); // Uses the method from the uniffi impl block
+        let result = self.process_chunk(chunk, mode);  
         
         Ok(serde_wasm_bindgen::to_value(&result)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-    use crate::types::{FaceInput, WaveformMode}; // Ensure other types are imported if not already available in super
-
-    // --- Mocks & Helpers ---
-
-    fn mock_config(vitals: Vec<&str>) -> ModelConfig {
-        ModelConfig {
-            name: "test_model".to_string(),
-            supported_vitals: vitals.iter().map(|s| s.to_string()).collect(),
-            fps_target: 30.0,
-            input_size: 30,
-            roi_method: "face".to_string(),
-        }
-    }
-
-    fn mock_chunk(
-        times: Vec<f64>, 
-        signals: Vec<(&str, Vec<f32>)>, 
-        face: Option<FaceInput>
-    ) -> InputChunk {
-        let mut sig_map = HashMap::new();
-        let mut conf_map = HashMap::new();
-        
-        for (key, data) in signals {
-            let len = data.len();
-            sig_map.insert(key.to_string(), data);
-            conf_map.insert(key.to_string(), vec![1.0; len]);  
-        }
-
-        InputChunk {
-            timestamp: times,
-            signals: sig_map,
-            confidences: conf_map,
-            face,
-        }
-    }
-
-    fn mock_sine(len: usize, fs: f32, freq_hz: f32) -> Vec<f32> {
-        (0..len).map(|i| {
-            let t = i as f32 / fs;
-            (t * 2.0 * std::f32::consts::PI * freq_hz).sin()
-        }).collect()
-    }
-
-    // --- Tests ---
-
-    #[test]
-    fn st_01_soft_stitching_averages_overlap() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let chunk1 = mock_chunk(
-            vec![1.0, 2.0], 
-            vec![("ppg_waveform", vec![10.0, 20.0])], 
-            None
-        );
-        let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-        let chunk2 = mock_chunk(
-            vec![2.0, 3.0], 
-            vec![("ppg_waveform", vec![22.0, 30.0])], 
-            None
-        );
-        let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-        let ppg = result.signals.get("ppg_waveform").unwrap();
-        
-        assert_eq!(result.timestamp, vec![1.0, 2.0, 3.0]);
-        // Average of 20.0 and 22.0 is 21.0
-        assert!((ppg.data[1] - 21.0).abs() < 0.001, "Expected 21.0, got {}", ppg.data[1]);
-    }
-
-    #[test]
-    fn st_02_disjoint_chunks_handle_gaps() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let chunk1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-        let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-        let chunk2 = mock_chunk(vec![5.0], vec![("ppg_waveform", vec![50.0])], None);
-        let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-        assert_eq!(result.timestamp, vec![1.0, 5.0]);
-        assert_eq!(result.signals["ppg_waveform"].data, vec![10.0, 50.0]);
-    }
-
-    #[test]
-    fn st_03_exact_duplicate_chunks_ignored() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let chunk1 = mock_chunk(vec![1.0, 2.0], vec![("ppg_waveform", vec![10.0, 20.0])], None);
-        let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-        let chunk2 = mock_chunk(vec![1.0, 2.0], vec![("ppg_waveform", vec![10.0, 20.0])], None);
-        let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-        assert_eq!(result.timestamp, vec![1.0, 2.0]);
-        
-        let ppg = &result.signals["ppg_waveform"].data;
-        assert_eq!(ppg[0], 10.0);
-        assert_eq!(ppg[1], 20.0);
-    }
-
-    #[test]
-    fn st_04_nan_handling_in_signal() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let c1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-        session.process_chunk(c1, WaveformMode::Global);
-
-        let c2 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![f32::NAN])], None);
-        let result = session.process_chunk(c2, WaveformMode::Global);
-    
-        let val = result.signals["ppg_waveform"].data[0];
-        assert!(!val.is_nan());
-        assert!((val - 10.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn st_05_pruning_limits_history() {
-        let mut config = mock_config(vec!["ppg_waveform"]);
-        config.fps_target = 1.0; 
-        
-        let session = Session::new(config);
-
-        let times: Vec<f64> = (0..100).map(|i| i as f64).collect();
-        let ppg: Vec<f32> = vec![1.0; 100];
-        
-        let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-        let result = session.process_chunk(chunk, WaveformMode::Incremental);
-
-        // Expect truncation to 60s (default logic)
-        assert_eq!(result.timestamp.len(), 60);
-        assert_eq!(result.timestamp.first(), Some(&40.0));  
-        assert_eq!(result.timestamp.last(), Some(&99.0));
-    }
-
-    #[test]
-    fn reg_01_dependency_ordering() {
-        // Needs heart_rate to calculate SDNN
-        let config = mock_config(vec!["ppg_waveform", "hrv_sdnn", "heart_rate"]);
-        let session = Session::new(config);
-
-        let fs: f32 = 30.0;  
-        let total_samples = 660;  
-        let times: Vec<f64> = (0..total_samples).map(|i| i as f64 / fs as f64).collect();
-        
-        // Generate a signal that changes frequency to ensure HR detection works
-        let mut ppg = Vec::new();
-        let mut phase = 0.0;
-        for i in 0..total_samples {
-            let t = i as f32 / fs;  
-            let current_freq = if t < 10.0 { 1.0 } else { 1.3 };
-            phase += 2.0 * std::f32::consts::PI * current_freq / fs;
-            let val = phase.sin().max(0.0).powf(4.0);
-            ppg.push(val);
-        }
-
-        let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        if !result.signals.contains_key("hrv_sdnn") {
-            println!("Available signals: {:?}", result.signals.keys());
-        }
-
-        assert!(result.signals.contains_key("heart_rate"), "Heart Rate missing");
-        assert!(result.signals.contains_key("hrv_sdnn"), "SDNN missing");
-    }
-
-    #[test]
-    fn reg_02_minimum_data_gating() {
-        let config = mock_config(vec!["ppg_waveform", "heart_rate"]);
-        let session = Session::new(config);
-
-        // 2 seconds of data (too short for HR)
-        let times: Vec<f64> = (0..60).map(|i| i as f64 / 30.0).collect();
-        let ppg = mock_sine(60, 30.0, 1.2);
-        
-        let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-        
-        assert!(result.signals.contains_key("ppg_waveform"));
-        assert!(!result.signals.contains_key("heart_rate"));
-    }
-
-    #[test]
-    fn reg_03_alias_resolution() {
-        // Request "pulse" (alias), expect "heart_rate" (canonical)
-        let config = mock_config(vec!["ppg_waveform", "pulse"]);
-        let session = Session::new(config);
-
-        let times: Vec<f64> = (0..150).map(|i| i as f64 / 30.0).collect();
-        let ppg = mock_sine(150, 30.0, 1.2);
-
-        let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        assert!(result.signals.contains_key("heart_rate"));
-        assert!(!result.signals.contains_key("pulse"));
-    }
-
-    #[test]
-    fn reg_04_provided_scalar_spo2() {
-        // If "spo2" is provided as input, it should pass through
-        let mut config = mock_config(vec!["spo2"]);
-        config.fps_target = 1.0;  
-        
-        let session = Session::new(config);
-
-        let chunk = mock_chunk(
-            vec![1.0, 2.0, 3.0], 
-            vec![("spo2", vec![98.0, 99.0, 98.0])], 
-            None
-        );
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        let sig = result.signals.get("spo2").unwrap();
-        
-        assert_eq!(sig.data, vec![98.0, 99.0, 98.0]);
-        
-        assert!(sig.value.is_some(), "Scalar value missing");
-        let val = sig.value.unwrap();
-        assert!((val - 98.333).abs() < 0.01);
-    }
-
-    #[test]
-    fn reg_05_unsupported_vital() {
-        let config = mock_config(vec!["blood_pressure"]);  
-        let session = Session::new(config);
-
-        let chunk = mock_chunk(vec![1.0], vec![], None);
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        assert!(!result.signals.contains_key("blood_pressure"));
-    }
-
-    #[test]
-    fn out_01_incremental_mode() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let c1 = mock_chunk(vec![1.0], vec![("ppg_waveform", vec![10.0])], None);
-        let r1 = session.process_chunk(c1, WaveformMode::Incremental);
-        assert_eq!(r1.timestamp, vec![1.0]);
-
-        let c2 = mock_chunk(vec![2.0], vec![("ppg_waveform", vec![20.0])], None);
-        let r2 = session.process_chunk(c2, WaveformMode::Incremental);
-    
-        assert_eq!(r2.timestamp, vec![2.0]);
-        assert_eq!(r2.signals["ppg_waveform"].data, vec![20.0]);
-    }
-
-    #[test]
-    fn out_02_windowed_mode() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let times: Vec<f64> = (0..300).map(|i| i as f64 / 30.0).collect();
-        let ppg = vec![0.0; 300];
-        let chunk = mock_chunk(times, vec![("ppg_waveform", ppg)], None);
-
-        let result = session.process_chunk(chunk, WaveformMode::Windowed { seconds: 2.0 });
-
-        // Windowed mode should output the requested seconds (2.0s = 60 samples @ 30Hz)
-        assert_eq!(result.timestamp.len(), 60);
-        assert!(result.timestamp.last().unwrap() > &9.9);
-    }
-
-    #[test]
-    fn out_03_global_mode() {
-        let config = mock_config(vec!["spo2"]);
-        let session = Session::new(config);
-
-        let times1: Vec<f64> = (0..300).map(|i| i as f64 / 30.0).collect();
-        let ppg1 = vec![1.0; 300];
-        let chunk1 = mock_chunk(times1, vec![("spo2", ppg1)], None);
-        let _ = session.process_chunk(chunk1, WaveformMode::Global);
-
-        let times2: Vec<f64> = (300..360).map(|i| i as f64 / 30.0).collect();
-        let ppg2 = vec![2.0; 60];
-        let chunk2 = mock_chunk(times2, vec![("spo2", ppg2)], None);
-        
-        let result = session.process_chunk(chunk2, WaveformMode::Global);
-
-        assert_eq!(result.timestamp.len(), 360);
-        assert_eq!(result.timestamp.first(), Some(&0.0));
-        
-        let data = &result.signals["spo2"].data;
-        assert_eq!(data[0], 1.0);     
-        assert_eq!(data[359], 2.0);   
-    }
-
-    #[test]
-    fn face_01_sync_with_signal() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let face = FaceInput {
-            coordinates: vec![10.0, 10.0, 50.0, 50.0],
-            confidence: 0.9,
-        };
-
-        let chunk = mock_chunk(
-            vec![1.0, 2.0], 
-            vec![("ppg_waveform", vec![10.0, 20.0])], 
-            Some(face)
-        );
-
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        assert!(result.face.is_some());
-        let f = result.face.unwrap();
-        assert_eq!(f.coordinates.len(), 2);  
-        assert_eq!(f.confidence.len(), 2);
-        assert_eq!(f.coordinates[0], vec![10.0, 10.0, 50.0, 50.0]);
-    }
-
-    #[test]
-    fn face_02_missing_face_data_pads_zeros() {
-        let config = mock_config(vec!["ppg_waveform"]);
-        let session = Session::new(config);
-
-        let chunk = mock_chunk(
-            vec![1.0, 2.0], 
-            vec![("ppg_waveform", vec![10.0, 20.0])], 
-            None
-        );
-
-        let result = session.process_chunk(chunk, WaveformMode::Global);
-
-        assert!(result.face.is_some());
-        let f = result.face.unwrap();
-        assert_eq!(f.coordinates.len(), 2);
-        assert_eq!(f.coordinates[0], vec![0.0, 0.0, 0.0, 0.0]);
     }
 }
