@@ -39,7 +39,6 @@ class VitalLensProcessor {
     init() {
         // 1. Initialize the Session
         let config = SessionConfig(
-            name: "vitallens-v2-mobile",
             supportedVitals: ["heart_rate", "hrv_sdnn"],
             fpsTarget: 30.0,
             inputSize: 100,

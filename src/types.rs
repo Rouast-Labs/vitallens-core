@@ -10,7 +10,6 @@ use pyo3::prelude::*;
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))] 
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct SessionConfig {
-    pub name: String, // TODO: What is it needed for
     pub supported_vitals: Vec<String>,
     pub fps_target: f32,
     pub input_size: u64,
@@ -206,7 +205,6 @@ pub struct SessionResult {
     pub signals: HashMap<String, SignalResult>,
     pub fps: f32,
     pub message: String,
-    pub model_used: String,
 }
 
 // --- PYTHON CONSTRUCTORS ---
@@ -215,8 +213,8 @@ pub struct SessionResult {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    fn new(name: String, supported_vitals: Vec<String>, fps_target: f32, input_size: u64, n_inputs: u64, roi_method: String) -> Self {
-        Self { name, supported_vitals, fps_target, input_size, n_inputs, roi_method }
+    fn new(supported_vitals: Vec<String>, fps_target: f32, input_size: u64, n_inputs: u64, roi_method: String) -> Self {
+        Self { supported_vitals, fps_target, input_size, n_inputs, roi_method }
     }
 }
 

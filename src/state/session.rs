@@ -429,7 +429,6 @@ impl SessionCore {
             signals: signals_out,
             fps: effective_fps,
             message: "OK".to_string(),
-            model_used: self.config.name.clone(),
         }
     }
 }

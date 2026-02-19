@@ -265,7 +265,6 @@ mod tests {
     #[test]
     fn test_buffer_config_math() {
         let config = SessionConfig {
-            name: "test".to_string(),
             supported_vitals: vec![],
             fps_target: 30.0,
             input_size: 100, // bytes_per_frame = 100 * 100 * 3 = 30_000

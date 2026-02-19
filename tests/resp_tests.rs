@@ -63,7 +63,6 @@ fn test_ie_ratio_accuracy(resource: &str) {
         println!("=== TEST IE RATIO: {} ===", filename);
 
         let config = SessionConfig {
-            name: "test_ie".to_string(),
             supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
             fps_target: ref_data.fps,
             input_size: 30,

@@ -43,7 +43,6 @@ async function startVitalLens() {
 
     // 2. Define your configuration matching the SessionConfig Rust struct
     const config = {
-        name: "vitallens-web",
         supported_vitals: ["heart_rate", "respiratory_rate"],
         fps_target: 30.0,
         input_size: 100,

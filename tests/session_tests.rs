@@ -226,7 +226,6 @@ fn run_session_extraction(
     
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = SessionConfig {
-        name: format!("{}_{:?}", filename, mode),
         supported_vitals,
         fps_target: ref_data.fps,
         input_size: 30,
