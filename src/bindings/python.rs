@@ -9,7 +9,7 @@ use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 use crate::geometry::roi;
 use crate::types::{Rect, RoiMethod};
 
-pub fn register_functions(m: &PyModule) -> PyResult<()> {
+pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;

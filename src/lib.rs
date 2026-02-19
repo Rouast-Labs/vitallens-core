@@ -22,7 +22,7 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "python")]
 #[pymodule]
-fn vitallens_core(_py: Python, m: &PyModule) -> PyResult<()> {
+fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     // 1. Export the Session class
     m.add_class::<Session>()?;
 
