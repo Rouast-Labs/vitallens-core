@@ -64,12 +64,10 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         let config = ModelConfig {
             name: "test_ie".to_string(),
-            // FIX: Added "respiratory_rate" here. 
-            // The Session sorts execution by dependency order, so Rate will be calc'd first
-            // and passed as a hint to I:E Ratio.
             supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
             fps_target: ref_data.fps,
             input_size: 30,
+            n_inputs: 4,
             roi_method: "face".to_string(),
         };
         

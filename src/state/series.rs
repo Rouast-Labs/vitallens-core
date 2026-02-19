@@ -26,7 +26,6 @@ impl SignalBuffer {
             return;
         }
 
-        // 1. Handle Overlap (Add to existing tail)
         let current_len = self.sum.len();
         let valid_overlap = overlap.min(current_len).min(new_count);
 
@@ -41,7 +40,6 @@ impl SignalBuffer {
             }
         }
 
-        // 2. Append New Data
         if new_count > valid_overlap {
             let new_slice = &data[valid_overlap..];
             
@@ -66,7 +64,6 @@ impl SignalBuffer {
         }
     }
 
-    /// Computes the average and returns a linear Vec<f32>.
     pub fn compute_average(&self) -> Vec<f32> {
         self.sum
             .iter()
@@ -75,7 +72,6 @@ impl SignalBuffer {
             .collect()
     }
 
-    /// Removes old data from the front.
     pub fn prune(&mut self, keep_count: usize) {
         if self.sum.len() > keep_count {
             let remove_count = self.sum.len() - keep_count;

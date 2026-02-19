@@ -34,6 +34,12 @@ fn vitallens_core(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<types::SignalResult>()?;
     m.add_class::<types::FaceResult>()?;
     m.add_class::<types::Rect>()?;
+    m.add_class::<types::InferenceMode>()?;
+    m.add_class::<types::BufferConfig>()?;
+    m.add_class::<types::BufferActionType>()?;
+    m.add_class::<types::BufferAction>()?;
+    m.add_class::<types::InferenceCommand>()?;
+    m.add_class::<types::ExecutionPlan>()?;
 
     // 3. Export the Stateless Math functions
     // This calls code inside src/bindings/python.rs

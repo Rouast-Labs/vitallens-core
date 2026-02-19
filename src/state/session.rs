@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
-use crate::state::buffers::SignalBuffer;
+use crate::state::series::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
 use crate::signal::peaks::SignalBounds;

@@ -14,6 +14,7 @@ pub struct ModelConfig {
     pub supported_vitals: Vec<String>,
     pub fps_target: f32,
     pub input_size: u64,
+    pub n_inputs: u64,
     pub roi_method: String,
 }
 
@@ -118,6 +119,62 @@ impl<'source> FromPyObject<'source> for RoiMethod {
     }
 }
 
+// --- BUFFER MANAGEMENT TYPES ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
+pub enum InferenceMode {
+    Stream,
+    File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct BufferConfig {
+    pub min_no_state: u32,
+    pub min_with_state: u32,
+    pub stream_max: u32,
+    pub file_max: u32,
+    pub overlap: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
+pub enum BufferActionType {
+    Create,
+    KeepAlive,
+    Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct BufferAction {
+    pub action: BufferActionType,
+    pub id: String,
+    pub roi: Option<Rect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct InferenceCommand {
+    pub buffer_id: String,
+    pub take_count: u32,
+    pub keep_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct ExecutionPlan {
+    pub command: Option<InferenceCommand>,
+    pub buffers_to_drop: Vec<String>,
+}
+
 // --- OUTPUTS ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,8 +215,8 @@ pub struct SessionResult {
 #[pymethods]
 impl ModelConfig {
     #[new]
-    fn new(name: String, supported_vitals: Vec<String>, fps_target: f32, input_size: u64, roi_method: String) -> Self {
-        Self { name, supported_vitals, fps_target, input_size, roi_method }
+    fn new(name: String, supported_vitals: Vec<String>, fps_target: f32, input_size: u64, n_inputs: u64, roi_method: String) -> Self {
+        Self { name, supported_vitals, fps_target, input_size, n_inputs, roi_method }
     }
 }
 

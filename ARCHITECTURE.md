@@ -96,6 +96,7 @@ pub struct ModelConfig {
     pub supported_vitals: Vec<String>, // e.g. ["heart_rate", "hrv_sdnn"]
     pub fps_target: f32,
     pub input_size: u64,
+    pub n_inputs: u64,
     pub roi_method: String,
 }
 ```
