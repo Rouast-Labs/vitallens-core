@@ -8,7 +8,7 @@
 This library is a single Rust codebase that compiles into three targets:
 
 1.  **Python (`.so`):** Replaces `prpy` math. Built via `maturin`.
-2.  **iOS (`.a` / `.swift`):** Replaces `SignalOps.swift`. Built via `cargo` + `uniffi`.
+2.  **macOS (`.a` / `.swift`):** Replaces `SignalOps.swift`. Built via `cargo` + `uniffi`.
 3.  **Web (`.wasm`):** Replaces `physio.ts`. Built via `wasm-pack`.
 
 ## Directory Structure
@@ -43,19 +43,19 @@ make
 Builds the Rust core as a Python extension and installs it into your current environment.
 
 ```bash
-make check-python
+make build-python
 # Or alternatively
 maturin develop --features python
 ```
 
-### 2. iOS (Native Mobile)
+### 2. Apple
 
 **Step A: Build Libraries**
 
 Build the static library for both Simulator (x86_64) and Device (arm64).
 
 ```bash
-make check-ios
+make build-apple
 ```
 
 Or run specific builds:

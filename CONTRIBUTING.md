@@ -31,7 +31,7 @@ pip3 install maturin
 curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 ```
 
-**4. iOS Targets & Tools**
+**4. Apple Targets & Tools**
 
 Ensure you have Xcode Command Line Tools installed (required for `lipo` and `xcodebuild`). Then add the necessary Rust compilation targets:
 
@@ -39,6 +39,8 @@ Ensure you have Xcode Command Line Tools installed (required for `lipo` and `xco
 rustup target add aarch64-apple-ios
 rustup target add aarch64-apple-ios-sim
 rustup target add x86_64-apple-ios
+rustup target add aarch64-apple-darwin
+rustup target add x86_64-apple-darwin
 ```
 
 ---
@@ -52,8 +54,8 @@ We use a `Makefile` to automate common tasks. To keep development fast, the defa
 | `make` | **(Default)** Runs all fast verifications (`cargo check`) and unit tests. |
 | `make build` | Runs full, optimized release builds for Python, iOS, and Web. |
 | `make test` | Runs standard Rust unit tests (`cargo test`). |
-| `make check-<target>` | Runs `cargo check` for a specific target (`python`, `ios`, `web`) without generating artifacts. |
-| `make build-<target>` | Compiles the final release artifacts for a specific target (`python`, `ios`, `web`). |
+| `make check-<target>` | Runs `cargo check` for a specific target (`python`, `apple`, `web`) without generating artifacts. |
+| `make build-<target>` | Compiles the final release artifacts for a specific target (`python`, `apple`, `web`). |
 | `make clean` | Removes all build artifacts (`target/`, `pkg/`, `bindings/swift/`). |
 
 ---
@@ -107,16 +109,16 @@ make build-python
 
 ---
 
-### 🍎 iOS Bindings (UniFFI)
+### 🍎 Apple Bindings (UniFFI)
 
-Building for iOS requires compiling for physical devices, compiling for Intel/Apple Silicon simulators, merging the simulator binaries using `lipo`, generating Swift headers, and packaging an XCFramework.
+Building for iOS and macOS requires compiling for physical devices, compiling for Intel/Apple Silicon simulators, merging the simulator binaries using `lipo`, generating Swift headers, and packaging an XCFramework.
 
 **Generate the XCFramework:**
 
 Instead of running these manually, rely on the Makefile to handle the entire pipeline:
 
 ```bash
-make build-ios
+make build-apple
 ```
 
 *Output: `target/VitallensCore.xcframework` and `bindings/swift/VitalLensCore.swift*`

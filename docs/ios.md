@@ -9,7 +9,7 @@ Instead of manually running cargo and `xcodebuild` commands, use the automated m
 From the root of `vitallens-core`, run:
 
 ```bash
-make build-ios
+make build-apple
 ```
 
 This will output two components:

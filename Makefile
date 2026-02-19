@@ -1,4 +1,4 @@
-.PHONY: default check test check-python check-ios check-web build build-python build-ios build-web clean
+.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web clean
 
 default: check
 
@@ -6,7 +6,7 @@ default: check
 # MINIMAL TIME-INTENSIVE CHECKS
 # ==========================================
 
-check: test check-python check-ios check-web
+check: test check-python check-apple check-web
 	@echo "✅ All fast checks passed!"
 
 test:
@@ -17,11 +17,13 @@ check-python:
 	@echo "🐍 Checking Python compilation..."
 	cargo check --features python
 
-check-ios:
-	@echo "🍎 Checking iOS compilation..."
+check-apple:
+	@echo "🍎 Checking Apple compilation..."
 	cargo check --target x86_64-apple-ios --lib
 	cargo check --target aarch64-apple-ios-sim --lib
 	cargo check --target aarch64-apple-ios --lib
+	cargo check --target aarch64-apple-darwin --lib
+	cargo check --target x86_64-apple-darwin --lib
 
 check-web:
 	@echo "🕸️ Checking Wasm compilation..."
@@ -31,7 +33,7 @@ check-web:
 # FULL BUILDS
 # ==========================================
 
-build: build-python build-ios build-web
+build: build-python build-apple build-web
 	@echo "✅ All release builds complete!"
 
 build-python:
@@ -39,11 +41,16 @@ build-python:
 	maturin build --release --features python
 	@echo "✅ Python Wheel built in target/wheels/"
 
-build-ios:
-	@echo "🍎 Building iOS Static Libraries..."
+build-apple:
+	@echo "🍎 Building Apple Static Libraries..."
+	# iOS Device
+	cargo build --release --target aarch64-apple-ios --lib
+	# iOS Simulator
 	cargo build --release --target x86_64-apple-ios --lib
 	cargo build --release --target aarch64-apple-ios-sim --lib
-	cargo build --release --target aarch64-apple-ios --lib
+	# macOS
+	cargo build --release --target aarch64-apple-darwin --lib
+	cargo build --release --target x86_64-apple-darwin --lib
 	@echo "🔗 Generating Swift Bindings..."
 	cargo run --features=uniffi/cli --bin uniffi-bindgen generate \
 		--library target/aarch64-apple-ios/release/libvitallens_core.dylib \
@@ -58,6 +65,11 @@ build-ios:
 	lipo -create target/x86_64-apple-ios/release/libvitallens_core.a \
 	             target/aarch64-apple-ios-sim/release/libvitallens_core.a \
 	     -output target/ios-sim/libvitallens_core.a
+	@echo "📦 Merging macOS Binaries (lipo)..."
+	mkdir -p target/macos
+	lipo -create target/x86_64-apple-darwin/release/libvitallens_core.a \
+	             target/aarch64-apple-darwin/release/libvitallens_core.a \
+	     -output target/macos/libvitallens_core.a
 	@echo "📦 Creating XCFramework..."
 	rm -rf target/VitalLensCoreFFI.xcframework
 	xcodebuild -create-xcframework \
@@ -65,14 +77,15 @@ build-ios:
 		-headers bindings/headers \
 		-library target/ios-sim/libvitallens_core.a \
 		-headers bindings/headers \
+		-library target/macos/libvitallens_core.a \
+		-headers bindings/headers \
 		-output target/VitalLensCoreFFI.xcframework
-	@echo "✅ iOS Build Complete! -> target/VitalLensCoreFFI.xcframework"
+	@echo "✅ Apple Build Complete! -> target/VitalLensCoreFFI.xcframework"
 
 build-web:
 	@echo "🕸️ Building Wasm Package..."
 	wasm-pack build --target web --no-default-features
 	@echo "✅ Web Build Complete! -> pkg/"
-
 
 # ==========================================
 # UTILITIES
@@ -82,4 +95,4 @@ clean:
 	cargo clean
 	rm -rf target/
 	rm -rf pkg/
-	rm -rf bindings/swift/
+	rm -rf bindings/
