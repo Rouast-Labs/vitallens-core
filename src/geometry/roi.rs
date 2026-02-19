@@ -12,10 +12,12 @@ const UPPER_BODY_OFFSETS: [f32; 4] = [0.25, 0.20, 0.25, 0.40];
 /// Upper Body Cropped (Version 1 - Cropped)
 const UPPER_BODY_CROPPED_OFFSETS: [f32; 4] = [0.19, 0.1455, 0.19, 0.2769];
 
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn calculate_roi(
     face: Rect,
     method: RoiMethod,
-    container: Option<(f32, f32)>, 
+    container_width: Option<f32>,
+    container_height: Option<f32>,
     force_even: bool
 ) -> Rect {
     let offsets = match method {
@@ -24,6 +26,12 @@ pub fn calculate_roi(
         RoiMethod::UpperBody => UPPER_BODY_OFFSETS,
         RoiMethod::UpperBodyCropped => UPPER_BODY_CROPPED_OFFSETS,
         RoiMethod::Custom { left, top, right, bottom } => [left, top, right, bottom],
+    };
+
+    // Reconstruct the tuple for the internal logic
+    let container = match (container_width, container_height) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None
     };
 
     apply_offsets(face, offsets, container, force_even)
@@ -77,7 +85,7 @@ fn apply_offsets(
     Rect { x: new_x, y: new_y, width: new_w, height: new_h }
 }
 
-/// Computes Intersection over Union (IoU) between two rectangles.
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn compute_iou(a: Rect, b: Rect) -> f32 {
     let x_overlap = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
     let y_overlap = (a.y + a.height).min(b.y + b.height) - a.y.max(b.y);
@@ -96,7 +104,7 @@ pub fn compute_iou(a: Rect, b: Rect) -> f32 {
     }
 }
 
-/// Checks if `inner` is contained within `outer` given a required overlap percentage.
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn is_contained(inner: Rect, outer: Rect, min_overlap_pct: f32) -> bool {
     let inner_r = inner.x + inner.width;
     let inner_b = inner.y + inner.height;
@@ -137,7 +145,7 @@ mod tests {
     #[test]
     fn test_roi_face() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::Face, None, false);
+        let result = calculate_roi(face, RoiMethod::Face, None, None, false);
         
         assert_rect_approx_eq(result, Rect::new(116.0, 112.0, 48.0, 96.0), 0.1);
     }
@@ -145,7 +153,7 @@ mod tests {
     #[test]
     fn test_roi_face_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::Face, None, false);
+        let result = calculate_roi(face, RoiMethod::Face, None, None, false);
         
         assert_rect_approx_eq(result, Rect::new(0.116, 0.112, 0.048, 0.096), 0.0001);
     }
@@ -153,7 +161,7 @@ mod tests {
     #[test]
     fn test_roi_forehead() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::Forehead, None, false);
+        let result = calculate_roi(face, RoiMethod::Forehead, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(128.0, 118.0, 24.0, 12.0), 0.1);
     }
@@ -161,7 +169,7 @@ mod tests {
     #[test]
     fn test_roi_forehead_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::Forehead, None, false);
+        let result = calculate_roi(face, RoiMethod::Forehead, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.128, 0.118, 0.024, 0.012), 0.0001);
     }
@@ -169,7 +177,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::UpperBody, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBody, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(80.0, 76.0, 120.0, 192.0), 0.1);
     }
@@ -177,7 +185,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::UpperBody, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBody, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.080, 0.076, 0.120, 0.192), 0.0001);
     }
@@ -185,7 +193,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body_cropped() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(84.8, 82.54, 110.4, 170.688), 0.01);
     }
@@ -193,7 +201,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body_cropped_normalized() {
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.0848, 0.08254, 0.1104, 0.170688), 0.0001);
     }
@@ -206,7 +214,7 @@ mod tests {
         let container = (40.0, 40.0); 
 
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
-        let result = calculate_roi(face, identity, Some(container), false);
+        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 10.0);
         assert_eq!(result.y, 10.0);
@@ -220,7 +228,7 @@ mod tests {
         let container = (1.0, 1.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, Some(container), false);
+        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 0.9);
         assert_eq!(result.y, 0.9);
@@ -234,7 +242,7 @@ mod tests {
         let container = (100.0, 100.0);
         let expand = RoiMethod::Custom { left: 0.5, top: 0.5, right: 0.5, bottom: 0.5 };
 
-        let result = calculate_roi(face, expand, Some(container), false);
+        let result = calculate_roi(face, expand, Some(container.0), Some(container.1), false);
 
         assert_rect_approx_eq(result, Rect::new(0.0, 0.0, 100.0, 100.0), 0.001);
     }
@@ -245,7 +253,7 @@ mod tests {
         let container = (1.0, 1.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, Some(container), false);
+        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 0.0);
         assert_eq!(result.y, 0.0);
@@ -258,7 +266,7 @@ mod tests {
         let face = Rect::new(50.0, 50.0, 51.0, 53.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, None, true);
+        let result = calculate_roi(face, identity, None, None, true);
 
         assert_eq!(result.width, 50.0);
         assert_eq!(result.height, 52.0);

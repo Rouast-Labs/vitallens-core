@@ -49,15 +49,24 @@ build-ios:
 		--library target/aarch64-apple-ios/release/libvitallens_core.dylib \
 		--language swift \
 		--out-dir bindings/swift
+	@echo "📦 Fixing Modulemap for SPM..."
+	mkdir -p bindings/headers
+	cp bindings/swift/*FFI.h bindings/headers/
+	cp bindings/swift/*.modulemap bindings/headers/module.modulemap
+	@echo "📦 Merging Simulator Binaries (lipo)..."
+	mkdir -p target/ios-sim
+	lipo -create target/x86_64-apple-ios/release/libvitallens_core.a \
+	             target/aarch64-apple-ios-sim/release/libvitallens_core.a \
+	     -output target/ios-sim/libvitallens_core.a
 	@echo "📦 Creating XCFramework..."
-	rm -rf target/VitallensCore.xcframework
+	rm -rf target/VitalLensCoreFFI.xcframework
 	xcodebuild -create-xcframework \
 		-library target/aarch64-apple-ios/release/libvitallens_core.a \
-		-headers bindings/swift \
-		-library target/aarch64-apple-ios-sim/release/libvitallens_core.a \
-		-headers bindings/swift \
-		-output target/VitallensCore.xcframework
-	@echo "✅ iOS Build Complete! -> target/VitallensCore.xcframework"
+		-headers bindings/headers \
+		-library target/ios-sim/libvitallens_core.a \
+		-headers bindings/headers \
+		-output target/VitalLensCoreFFI.xcframework
+	@echo "✅ iOS Build Complete! -> target/VitalLensCoreFFI.xcframework"
 
 build-web:
 	@echo "🕸️ Building Wasm Package..."

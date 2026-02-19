@@ -1,0 +1,4 @@
+module VitalLensCoreFFI {
+    header "VitalLensCoreFFI.h"
+    export *
+}

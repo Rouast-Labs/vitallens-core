@@ -35,7 +35,7 @@ impl BufferConfig {
     }
 }
 
-/// Internal metadata for a buffer. 
+#[derive(Debug)]
 struct GhostBufferMetadata {
     id: String,
     roi: Rect,
@@ -43,7 +43,8 @@ struct GhostBufferMetadata {
     last_seen: f64,
 }
 
-pub struct BufferManager {
+#[derive(Debug)]
+pub struct BufferManagerCore {
     buffers: HashMap<String, GhostBufferMetadata>,
     config: BufferConfig,
     iou_threshold: f32,
@@ -51,7 +52,7 @@ pub struct BufferManager {
     next_id: u64,
 }
 
-impl BufferManager {
+impl BufferManagerCore {
     pub fn new(config: BufferConfig) -> Self {
         Self {
             buffers: HashMap::new(),
@@ -210,6 +211,40 @@ impl BufferManager {
     }
 }
 
+#[derive(Debug)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
+pub struct BufferManager {
+    core: std::sync::Mutex<BufferManagerCore>,
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
+impl BufferManager {
+    #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
+    pub fn new(config: BufferConfig) -> Self {
+        Self {
+            core: std::sync::Mutex::new(BufferManagerCore::new(config)),
+        }
+    }
+
+    pub fn register_roi(&self, target_roi: Rect, timestamp: f64) -> BufferAction {
+        self.core.lock().unwrap().register_roi(target_roi, timestamp)
+    }
+
+    pub fn poll(
+        &self, 
+        current_counts: HashMap<String, u32>, 
+        mode: InferenceMode, 
+        has_state: bool, 
+        flush: bool
+    ) -> ExecutionPlan {
+        self.core.lock().unwrap().poll(&current_counts, mode, has_state, flush)
+    }
+
+    pub fn reset(&self) {
+        self.core.lock().unwrap().reset()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -253,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_register_roi_creates_new() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         let roi = Rect::new(0.0, 0.0, 100.0, 100.0);
         
         let res = mgr.register_roi(roi, 1.0);
@@ -265,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_register_roi_keeps_alive() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         let roi2 = Rect::new(5.0, 5.0, 100.0, 100.0); // High overlap (IoU)
 
@@ -279,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_register_roi_low_iou_creates_new() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         let roi2 = Rect::new(500.0, 500.0, 100.0, 100.0); // No overlap
 
@@ -293,7 +328,7 @@ mod tests {
 
     #[test]
     fn test_register_roi_prunes_stale() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         let roi = Rect::new(0.0, 0.0, 100.0, 100.0);
         
         mgr.register_roi(roi, 1.0); // Creates buf_0, last_seen = 1.0
@@ -310,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_file_mode_wait_logic() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
 
         let mut counts = HashMap::new();
@@ -327,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_file_mode_flush() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
 
         let mut counts = HashMap::new();
@@ -342,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_stream_mode_latency() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
 
         let mut counts = HashMap::new();
@@ -354,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_stream_mode_cap_take_count() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
         
         let mut counts = HashMap::new();
@@ -367,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_file_mode_cap_take_count() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
         
         let mut counts = HashMap::new();
@@ -380,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_stateful_inference_threshold() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
         
         let mut counts = HashMap::new();
@@ -395,7 +430,7 @@ mod tests {
 
     #[test]
     fn test_overlap_keep_count() {
-        let mut mgr = BufferManager::new(mock_config()); // overlap = 3
+        let mut mgr = BufferManagerCore::new(mock_config()); // overlap = 3
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
         
         let mut counts = HashMap::new();
@@ -408,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_poll_multiple_buffers_prioritizes_newest_and_drops_older() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         
         // Register multiple buffers over time
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);     // buf_0 (Oldest)
@@ -437,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_reset_clears_state() {
-        let mut mgr = BufferManager::new(mock_config());
+        let mut mgr = BufferManagerCore::new(mock_config());
         mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0); // creates buf_0
         
         mgr.reset();

@@ -123,5 +123,6 @@ fn calculate_roi(
     container: Option<(f32, f32)>,
     force_even: bool
 ) -> PyResult<Rect> {
-    Ok(roi::calculate_roi(face, method, container, force_even))
+    let (cw, ch) = container.map(|(w, h)| (Some(w), Some(h))).unwrap_or((None, None));    
+    Ok(roi::calculate_roi(face, method, cw, ch, force_even))
 }
