@@ -128,9 +128,9 @@ fn test_session(resource: &str) {
     let active_vitals: Vec<&String> = cases.iter().map(|c| &c.vital_id).collect();
     println!(" -> Active Vitals: {:?}", active_vitals);
 
-    let (global_results, global_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Global);
-    let (inc_results, inc_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Incremental);
-    let (win_results, win_waves) = run_session_extraction(filename, &ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
+    let (global_results, global_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Global);
+    let (inc_results, inc_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Incremental);
+    let (win_results, win_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
 
     let mut failures = Vec::new();
 
@@ -218,7 +218,6 @@ fn test_session(resource: &str) {
 }
 
 fn run_session_extraction(
-    filename: &str, 
     ref_data: &ReferenceData, 
     cases: &[TestCase], 
     mode: WaveformMode
