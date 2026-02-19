@@ -41,7 +41,7 @@ async function startVitalLens() {
     // 1. Initialize the Wasm memory module (Required before using the library)
     await init(); 
 
-    // 2. Define your configuration matching the ModelConfig Rust struct
+    // 2. Define your configuration matching the SessionConfig Rust struct
     const config = {
         name: "vitallens-web",
         supported_vitals: ["heart_rate", "respiratory_rate"],

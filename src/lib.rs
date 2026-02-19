@@ -10,7 +10,7 @@ mod bindings;
 // --- TIER 1: STATEFUL SESSION (iOS, JS, Python Apps) ---
 // Re-export these so they appear at the top level for UniFFI/Wasm
 pub use state::session::Session;
-pub use types::{ModelConfig, InputChunk, WaveformMode, SessionResult};
+pub use types::{SessionConfig, InputChunk, WaveformMode, SessionResult};
 
 // --- UNIFFI SETUP (iOS) ---
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,7 +27,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
 
     // 2. Export the Data types
-    m.add_class::<types::ModelConfig>()?;
+    m.add_class::<types::SessionConfig>()?;
     m.add_class::<types::InputChunk>()?;
     m.add_class::<types::FaceInput>()?;
     m.add_class::<types::SessionResult>()?;

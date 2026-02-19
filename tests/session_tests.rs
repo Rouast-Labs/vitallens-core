@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::Deserialize;
 use test_generator::test_resources;
 
-use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
+use vitallens_core::{Session, SessionConfig, InputChunk, WaveformMode};
 use vitallens_core::registry;
 use vitallens_core::types::FaceInput;
 
@@ -225,7 +225,7 @@ fn run_session_extraction(
 ) -> (HashMap<String, (f32, f32)>, HashMap<String, (Vec<f32>, Vec<f32>)>) {
     
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
-    let config = ModelConfig {
+    let config = SessionConfig {
         name: format!("{}_{:?}", filename, mode),
         supported_vitals,
         fps_target: ref_data.fps,

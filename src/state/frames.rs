@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::types::{Rect, ModelConfig, BufferConfig, InferenceMode, BufferAction, BufferActionType, InferenceCommand, ExecutionPlan};
+use crate::types::{Rect, SessionConfig, BufferConfig, InferenceMode, BufferAction, BufferActionType, InferenceCommand, ExecutionPlan};
 use crate::geometry::roi;
 
 const MAX_BASE64_BYTES: f64 = 5_760_000.0;
@@ -7,7 +7,7 @@ const MAX_STREAM_POLICY_FRAMES: u32 = 150;
 const BASE64_OVERHEAD: f64 = 1.3333;
 
 impl BufferConfig {
-    pub fn from_model_config(config: &ModelConfig) -> Self {
+    pub fn from_session_config(config: &SessionConfig) -> Self {
         let n_inputs = config.n_inputs as u32;
         let input_size = config.input_size as u32;
 
@@ -248,7 +248,7 @@ impl BufferManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::ModelConfig;
+    use crate::types::SessionConfig;
 
     fn mock_config() -> BufferConfig {
         BufferConfig {
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_buffer_config_math() {
-        let config = ModelConfig {
+        let config = SessionConfig {
             name: "test".to_string(),
             supported_vitals: vec![],
             fps_target: 30.0,
@@ -272,7 +272,7 @@ mod tests {
             n_inputs: 5,
             roi_method: "face".to_string(),
         };
-        let buf_cfg = BufferConfig::from_model_config(&config);
+        let buf_cfg = BufferConfig::from_session_config(&config);
         
         assert_eq!(buf_cfg.min_with_state, 5);
         assert_eq!(buf_cfg.min_no_state, 16); // 16.max(5)

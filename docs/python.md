@@ -9,7 +9,7 @@ Used in the backend or desktop tools to process streaming data.
 ```python
 import vitallens_core as vc
 
-config = vc.ModelConfig(
+config = vc.SessionConfig(
     name="research-v2",
     supported_vitals=["heart_rate", "hrv_rmssd"],
     fps_target=30.0,

@@ -9,8 +9,8 @@ use pyo3::prelude::*;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))] 
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
-pub struct ModelConfig {
-    pub name: String,
+pub struct SessionConfig {
+    pub name: String, // TODO: What is it needed for
     pub supported_vitals: Vec<String>,
     pub fps_target: f32,
     pub input_size: u64,
@@ -213,7 +213,7 @@ pub struct SessionResult {
 
 #[cfg(feature = "python")]
 #[pymethods]
-impl ModelConfig {
+impl SessionConfig {
     #[new]
     fn new(name: String, supported_vitals: Vec<String>, fps_target: f32, input_size: u64, n_inputs: u64, roi_method: String) -> Self {
         Self { name, supported_vitals, fps_target, input_size, n_inputs, roi_method }

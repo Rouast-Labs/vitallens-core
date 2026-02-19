@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::Deserialize;
 use test_generator::test_resources;
 
-use vitallens_core::{Session, ModelConfig, InputChunk, WaveformMode};
+use vitallens_core::{Session, SessionConfig, InputChunk, WaveformMode};
 use vitallens_core::registry;
 
 const TOLERANCE_IE_RATIO: f32 = 0.15;
@@ -62,7 +62,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         println!("=== TEST IE RATIO: {} ===", filename);
 
-        let config = ModelConfig {
+        let config = SessionConfig {
             name: "test_ie".to_string(),
             supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
             fps_target: ref_data.fps,

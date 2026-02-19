@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::types::{InputChunk, ModelConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
+use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
 use crate::state::series::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 
 #[derive(Debug)]
 struct SessionCore {
-    config: ModelConfig,
+    config: SessionConfig,
     timestamps: Vec<f64>,
     signal_data: HashMap<String, SignalBuffer>,
     signal_confs: HashMap<String, SignalBuffer>,
@@ -29,7 +29,7 @@ struct SessionCore {
 }
 
 impl SessionCore {
-    fn new(config: ModelConfig) -> Self {
+    fn new(config: SessionConfig) -> Self {
         let max_history = (config.fps_target * 60.0) as usize;
         
         let mut resolved_metas = Vec::new();
@@ -447,7 +447,7 @@ pub struct Session {
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 impl Session {
     #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
-    pub fn new(config: ModelConfig) -> Self {
+    pub fn new(config: SessionConfig) -> Self {
         Self {
             core: Mutex::new(SessionCore::new(config))
         }
@@ -463,7 +463,7 @@ impl Session {
 #[pymethods]
 impl Session {
     #[new]
-    pub fn py_new(config: &ModelConfig) -> Self {
+    pub fn py_new(config: &SessionConfig) -> Self {
         Self {
             core: Mutex::new(SessionCore::new(config.clone()))
         }
@@ -481,7 +481,7 @@ impl Session {
 impl Session {
     #[wasm_bindgen(constructor)]
     pub fn new_js(config_val: JsValue) -> Result<Session, JsError> {
-        let config: ModelConfig = serde_wasm_bindgen::from_value(config_val)?;
+        let config: SessionConfig = serde_wasm_bindgen::from_value(config_val)?;
         Ok(Self {
             core: Mutex::new(SessionCore::new(config))
         })
