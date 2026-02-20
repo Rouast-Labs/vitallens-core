@@ -11,6 +11,7 @@ use pyo3::prelude::*;
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct SessionConfig {
     pub supported_vitals: Vec<String>,
+    pub return_waveforms: Option<Vec<String>>,
     pub fps_target: f32,
     pub input_size: u64,
     pub n_inputs: u64,
@@ -223,12 +224,19 @@ pub struct ExecutionPlan {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
-pub struct SignalResult {
-    pub value: Option<f32>,
+pub struct WaveformResult {
     pub data: Vec<f32>,
     pub confidence: Vec<f32>,
     pub unit: String,
-    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct VitalResult {
+    pub value: f32,
+    pub confidence: f32,
+    pub unit: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,7 +254,8 @@ pub struct FaceResult {
 pub struct SessionResult {
     pub timestamp: Vec<f64>,
     pub face: Option<FaceResult>,
-    pub signals: HashMap<String, SignalResult>,
+    pub waveforms: HashMap<String, WaveformResult>,
+    pub vitals: HashMap<String, VitalResult>,
     pub fps: f32,
     pub message: String,
 }
@@ -257,8 +266,16 @@ pub struct SessionResult {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    fn new(supported_vitals: Vec<String>, fps_target: f32, input_size: u64, n_inputs: u64, roi_method: String) -> Self {
-        Self { supported_vitals, fps_target, input_size, n_inputs, roi_method }
+    #[pyo3(signature = (supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None))]
+    fn new(
+        supported_vitals: Vec<String>, 
+        fps_target: f32, 
+        input_size: u64, 
+        n_inputs: u64, 
+        roi_method: String,
+        return_waveforms: Option<Vec<String>>
+    ) -> Self {
+        Self { supported_vitals, return_waveforms, fps_target, input_size, n_inputs, roi_method }
     }
 }
 

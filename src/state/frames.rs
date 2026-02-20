@@ -207,8 +207,9 @@ mod tests {
     fn test_buffer_config_math() {
         let config = SessionConfig {
             supported_vitals: vec![],
+            return_waveforms: None,
             fps_target: 30.0,
-            input_size: 100, // bytes_per_frame = 100 * 100 * 3 = 30_000
+            input_size: 100,
             n_inputs: 5,
             roi_method: "face".to_string(),
         };

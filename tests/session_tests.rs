@@ -138,7 +138,6 @@ fn test_session(resource: &str) {
 
     for case in &cases {
         let vid = &case.vital_id;
-
         let wave_key = &case.input_signal_key;
 
         // --- GLOBAL Length Checks ---
@@ -163,7 +162,7 @@ fn test_session(resource: &str) {
             assert_eq!(data.len(), conf.len(), "WINDOWED {} data/conf length mismatch", wave_key);
         }
         
-        if let Some((val, conf)) = global_results.get(vid) {
+        if let Some(&(val, conf)) = global_results.get(vid) {
             let val_diff = (val - case.ground_truth).abs();
             let conf_diff = (conf - case.gt_confidence).abs();
             
@@ -190,7 +189,7 @@ fn test_session(resource: &str) {
         }
 
         match (inc_results.get(vid), win_results.get(vid)) {
-            (Some((inc_val, inc_conf)), Some((win_val, win_conf))) => {
+            (Some(&(inc_val, inc_conf)), Some(&(win_val, win_conf))) => {
                 let val_diff = (inc_val - win_val).abs();
                 let conf_diff = (inc_conf - win_conf).abs();
 
@@ -226,6 +225,7 @@ fn run_session_extraction(
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = SessionConfig {
         supported_vitals,
+        return_waveforms: Some(vec!["ppg_waveform".to_string(), "respiratory_waveform".to_string()]),
         fps_target: ref_data.fps,
         input_size: 30,
         n_inputs: 4,
@@ -317,7 +317,6 @@ fn run_session_extraction(
                 if let Some(last_coords) = face_res.coordinates.last() {
                      let end_idx = end - 1;
                      let input_coords = &ref_data.face.as_ref().unwrap().coordinates[end_idx];
-                     
                      if !last_coords.is_empty() && !input_coords.is_empty() {
                          assert!((last_coords[0] - input_coords[0]).abs() < 1.0, 
                              "Face coordinate drift detected: Input {:?} vs Output {:?}", input_coords, last_coords);
@@ -328,14 +327,9 @@ fn run_session_extraction(
             }
         }
 
-        for (key, val) in result.signals {
+        // Unpack waveforms
+        for (key, val) in result.waveforms {
             let entry = waveform_results.entry(key.clone()).or_insert((Vec::new(), Vec::new()));
-            
-            let avg_conf = if !val.confidence.is_empty() {
-                val.confidence.iter().sum::<f32>() / val.confidence.len() as f32
-            } else {
-                0.0
-            };
 
             if matches!(mode, WaveformMode::Incremental) {
                 if !val.data.is_empty() {
@@ -359,10 +353,11 @@ fn run_session_extraction(
                 entry.0 = val.data;
                 entry.1 = val.confidence;
             }
-
-            if let Some(v) = val.value {
-                final_results.insert(key, (v, avg_conf));
-            }
+        }
+        
+        // Unpack metrics
+        for (key, val) in result.vitals {
+            final_results.insert(key, (val.value, val.confidence));
         }
 
         if end == max_len { break; }

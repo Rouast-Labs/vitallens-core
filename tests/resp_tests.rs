@@ -1,5 +1,3 @@
-// FILE: tests/resp_tests.rs
-
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -64,6 +62,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         let config = SessionConfig {
             supported_vitals: vec!["respiratory_rate".to_string(), "ie_ratio".to_string()],
+            return_waveforms: None,
             fps_target: ref_data.fps,
             input_size: 30,
             n_inputs: 4,
@@ -84,25 +83,23 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         let result = session.process_chunk(chunk, WaveformMode::Global);
 
-        if let Some(res) = result.signals.get("ie_ratio") {
-            if let Some(val) = res.value {
-                // Extract the scalar confidence from the vector
-                let calc_conf = res.confidence.first().copied().unwrap_or(0.0);
+        if let Some(res) = result.vitals.get("ie_ratio") {
+             
+            let calc_conf = res.confidence;
+            
+            let val_diff = (res.value - gt.value).abs();
+            let conf_diff = (calc_conf - gt.confidence).abs();
+
+            println!(" -> Calculated: {:.3} (Conf: {:.2}), Ref: {:.3} (Ref Conf: {:.2})", 
+                res.value, calc_conf, gt.value, gt.confidence);
+
+            assert!(val_diff <= TOLERANCE_IE_RATIO, 
+                "IE Ratio value mismatch in {}: got {}, ref {}", filename, res.value, gt.value);
                 
-                let val_diff = (val - gt.value).abs();
-                let conf_diff = (calc_conf - gt.confidence).abs();
-
-                println!(" -> Calculated: {:.3} (Conf: {:.2}), Ref: {:.3} (Ref Conf: {:.2})", 
-                    val, calc_conf, gt.value, gt.confidence);
-
-                assert!(val_diff <= TOLERANCE_IE_RATIO, 
-                    "IE Ratio value mismatch in {}: got {}, ref {}", filename, val, gt.value);
-                    
-                assert!(conf_diff <= 0.1, 
-                    "IE Ratio confidence mismatch in {}: got {}, ref {}", filename, calc_conf, gt.confidence);
-            } else {
-                panic!("IE Ratio returned None for {}", filename);
-            }
+            assert!(conf_diff <= 0.1, 
+                "IE Ratio confidence mismatch in {}: got {}, ref {}", filename, calc_conf, gt.confidence);
+        } else {
+            panic!("IE Ratio returned None for {}", filename);
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput, SignalInput};
+use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, WaveformResult, VitalResult, FaceResult, FaceInput, SignalInput};
 use crate::state::series::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
@@ -69,7 +69,8 @@ impl SessionCore {
             return SessionResult {
                 timestamp: Vec::new(),
                 face: None,
-                signals: HashMap::new(),
+                waveforms: HashMap::new(),
+                vitals: HashMap::new(),
                 fps: self.config.fps_target,
                 message: msg,
             };
@@ -112,7 +113,7 @@ impl SessionCore {
     fn merge_signals(&mut self, signals: HashMap<String, SignalInput>, overlap: usize) {
         for (key, input) in signals {
             let data_buf = self.signal_data.entry(key.clone()).or_insert_with(SignalBuffer::new);
-            data_buf.merge(&input.data, overlap, Some("unitless".to_string())); // TODO: Only unitless for waveforms
+            data_buf.merge(&input.data, overlap, Some("unitless".to_string()));
 
             let conf_buf = self.signal_confs.entry(key).or_insert_with(SignalBuffer::new);
             conf_buf.merge(&input.confidence, overlap, None);
@@ -166,6 +167,7 @@ impl SessionCore {
 
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
+         
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
         for vital_id in vital_ids {
@@ -255,6 +257,7 @@ impl SessionCore {
                     let (val, conf) = match &cfg.method {
                         CalculationMethod::Rate(strategy) => {
                             let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
+                             
                             let hint = results.get("heart_rate").map(|(v, _)| *v);
                             
                             let res = crate::signal::rate::estimate_rate(
@@ -370,17 +373,17 @@ impl SessionCore {
             self.config.fps_target
         };
 
-        let mut signals_out = HashMap::new();
+        let mut waveforms_out = HashMap::new();
+        let mut vitals_out = HashMap::new();
         let fs = self.config.fps_target;  
 
-        for vital_id in &self.active_vitals {
-            if let Some(meta) = self.vital_metas.get(vital_id) {
-                
-                let mut waveform_data = Vec::new();
-                let mut waveform_conf = Vec::new();
-                
+        let return_waveforms = self.config.return_waveforms.clone().unwrap_or_default();
+
+        // Process and extract requested waveforms
+        for vital_id in return_waveforms {
+            if let Some(meta) = registry::get_vital_meta(&vital_id) {
                 if let VitalType::Provided = meta.vital_type {
-                    if let Some(buf) = self.signal_data.get(vital_id) {
+                    if let Some(buf) = self.signal_data.get(&vital_id) {
                         let full_data = buf.compute_average();
                         
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
@@ -388,7 +391,7 @@ impl SessionCore {
                                 crate::signal::filters::apply_processing(
                                     &full_data, 
                                     proc_cfg.operation, 
-                                    fs,
+                                    fs, // TODO: Uses target fs
                                     proc_cfg.min_freq,
                                     proc_cfg.max_freq
                                 )
@@ -399,29 +402,35 @@ impl SessionCore {
                             full_data
                         };
                         
-                        waveform_data = slice_vec_f32(&processed_data);
+                        let waveform_data = slice_vec_f32(&processed_data);
                         
-                        if let Some(c_buf) = self.signal_confs.get(vital_id) {
+                        let waveform_conf = if let Some(c_buf) = self.signal_confs.get(&vital_id) {
                             let full_conf = c_buf.compute_average();
-                            waveform_conf = slice_vec_f32(&full_conf);
+                            slice_vec_f32(&full_conf)
                         } else {
-                            waveform_conf = vec![1.0; waveform_data.len()];
+                            vec![1.0; waveform_data.len()]
+                        };
+
+                        if !waveform_data.is_empty() {
+                            waveforms_out.insert(vital_id.clone(), WaveformResult {
+                                data: waveform_data,
+                                confidence: waveform_conf,
+                                unit: meta.unit.clone(),
+                            });
                         }
                     }
                 }
+            }
+        }
 
-                let (val, conf_scalar) = match scalar_results.get(vital_id) {
-                    Some(&(v, c)) => (Some(v), vec![c]),
-                    None => (None, Vec::new()),
-                };
-                
-                if !waveform_data.is_empty() || val.is_some() {
-                    signals_out.insert(vital_id.clone(), SignalResult {
+        // Extract scalar vitals
+        for vital_id in &self.active_vitals {
+            if let Some(meta) = self.vital_metas.get(vital_id) {
+                if let Some(&(val, conf_scalar)) = scalar_results.get(vital_id) {
+                    vitals_out.insert(vital_id.clone(), VitalResult {
                         value: val,
-                        data: waveform_data,
-                        confidence: if !waveform_conf.is_empty() { waveform_conf } else { conf_scalar },
+                        confidence: conf_scalar,
                         unit: meta.unit.clone(),
-                        note: None,
                     });
                 }
             }
@@ -440,7 +449,8 @@ impl SessionCore {
         SessionResult {
             timestamp: slice_vec_f64(&self.timestamps),
             face: face_result,
-            signals: signals_out,
+            waveforms: waveforms_out,
+            vitals: vitals_out,
             fps: effective_fps,
             message: "OK".to_string(),
         }
