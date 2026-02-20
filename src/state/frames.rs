@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use crate::types::{Rect, SessionConfig, BufferConfig, InferenceMode, BufferAction, BufferActionType, InferenceCommand, ExecutionPlan};
+use crate::types::{Rect, SessionConfig, BufferConfig, InferenceMode, BufferAction, BufferActionType, InferenceCommand, ExecutionPlan, BufferMetadata};
 use crate::geometry::roi;
 
 const MAX_BASE64_BYTES: f64 = 5_760_000.0;
@@ -36,126 +35,100 @@ impl BufferConfig {
 }
 
 #[derive(Debug)]
-struct GhostBufferMetadata {
-    id: String,
-    roi: Rect,
-    created_at: f64,
-    last_seen: f64,
-}
-
-#[derive(Debug)]
-pub struct BufferPlannerCore {
-    buffers: HashMap<String, GhostBufferMetadata>,
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
+pub struct BufferPlanner {
     config: BufferConfig,
     iou_threshold: f32,
     timeout_seconds: f64,
-    next_id: u64,
 }
 
-impl BufferPlannerCore {
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
+impl BufferPlanner {
+    #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
     pub fn new(config: BufferConfig) -> Self {
         Self {
-            buffers: HashMap::new(),
             config,
             iou_threshold: 0.6,
             timeout_seconds: 5.0,
-            next_id: 0,
         }
     }
 
-    /// Registers a target ROI (from face detection or UI).
-    pub fn register_roi(&mut self, target_roi: Rect, timestamp: f64) -> BufferAction {
-        self.prune_stale_buffers(timestamp);
-
+    /// Evaluates a target ROI against the list of known buffers.
+    pub fn evaluate_target(&self, target_roi: Rect, timestamp: f64, active_buffers: Vec<BufferMetadata>) -> BufferAction {
         let mut best_id = None;
         let mut max_iou = -1.0;
 
-        for (id, meta) in &self.buffers {
+        for meta in &active_buffers {
+            if (timestamp - meta.last_seen) > self.timeout_seconds {
+                continue;
+            }
+
             let iou = roi::compute_iou(target_roi, meta.roi);
             if iou > max_iou {
                 max_iou = iou;
-                best_id = Some(id.clone());
+                best_id = Some(meta.id.clone());
             }
         }
 
         if let Some(id) = best_id {
             if max_iou >= self.iou_threshold {
-                if let Some(meta) = self.buffers.get_mut(&id) {
-                    meta.last_seen = timestamp;
-                    return BufferAction { 
-                        action: BufferActionType::KeepAlive, 
-                        id, 
-                        roi: None 
-                    };
-                }
+                return BufferAction { 
+                    action: BufferActionType::KeepAlive, 
+                    matched_id: Some(id), 
+                    roi: None 
+                };
             }
         }
 
-        let new_id = format!("buf_{}", self.next_id);
-        self.next_id += 1;
-
-        let new_meta = GhostBufferMetadata {
-            id: new_id.clone(),
-            roi: target_roi,
-            created_at: timestamp,
-            last_seen: timestamp,
-        };
-
-        self.buffers.insert(new_id.clone(), new_meta);
-
         BufferAction { 
             action: BufferActionType::Create, 
-            id: new_id, 
+            matched_id: None, 
             roi: Some(target_roi) 
         }
     }
 
-    /// Polls for a consumption plan based on current native buffer counts.
+    /// Determines which buffer gets consumed, and which buffers should be dropped.
     pub fn poll(
-        &mut self, 
-        current_counts: &HashMap<String, u32>, 
+        &self, 
+        active_buffers: Vec<BufferMetadata>, 
+        current_time: f64,
         mode: InferenceMode, 
-        has_state: bool,
+        has_state: bool, 
         flush: bool
     ) -> ExecutionPlan {
         
-        // 1. Identify Candidates
-        let mut ready_candidates: Vec<(&GhostBufferMetadata, u32)> = self.buffers.values()
-            .filter_map(|meta| {
-                let count = *current_counts.get(&meta.id)?;
-                if self.is_ready(count, mode, has_state, flush) {
-                    Some((meta, count))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        // 2. Prioritize (Youngest First)
-        ready_candidates.sort_by(|(a, _), (b, _)| {
-            b.created_at.partial_cmp(&a.created_at).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
         let mut command = None;
         let mut buffers_to_drop = Vec::new();
 
-        // 3. Pick Winner
-        if let Some((winner_meta, winner_count)) = ready_candidates.first() {
-            let winner_id = winner_meta.id.clone();
-            let winner_created_at = winner_meta.created_at;
+        // Automatically mark any buffers that exceed the timeout limit for deletion
+        for meta in &active_buffers {
+            if (current_time - meta.last_seen) > self.timeout_seconds {
+                buffers_to_drop.push(meta.id.clone());
+            }
+        }
+
+        // Filter to candidates that are both alive and meet frame count limits
+        let mut ready_candidates: Vec<&BufferMetadata> = active_buffers.iter()
+            .filter(|meta| !buffers_to_drop.contains(&meta.id))
+            .filter(|meta| self.is_ready(meta.count, mode, has_state, flush))
+            .collect();
+
+        // Sort descending by creation date (newest buffer wins)
+        ready_candidates.sort_by(|a, b| {
+            b.created_at.partial_cmp(&a.created_at).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Resolve the winner and generate execution limits
+        if let Some(winner) = ready_candidates.first() {
+            let winner_id = winner.id.clone();
+            let winner_created_at = winner.created_at;
 
             let take_count = if flush {
-                *winner_count
+                winner.count // TODO: How do we make sure this is not > max?
             } else {
                 match mode {
-                    InferenceMode::Stream => (*winner_count).min(self.config.stream_max),
-                    InferenceMode::File => {
-                        if *winner_count >= self.config.file_max {
-                            self.config.file_max
-                        } else {
-                            *winner_count
-                        }
-                    }
+                    InferenceMode::Stream => winner.count.min(self.config.stream_max),
+                    InferenceMode::File => winner.count.min(self.config.file_max),
                 }
             };
 
@@ -167,17 +140,12 @@ impl BufferPlannerCore {
                 keep_count,
             });
 
-            // Kill Logic: Drop all buffers strictly OLDER than the winner.
-            for meta in self.buffers.values() {
-                if meta.created_at < winner_created_at {
+            // Mark any buffer older than the winner for deletion to prevent zombies
+            for meta in &active_buffers {
+                if meta.created_at < winner_created_at && !buffers_to_drop.contains(&meta.id) {
                     buffers_to_drop.push(meta.id.clone());
                 }
             }
-        }
-
-        // 4. Cleanup Rust State
-        for id in &buffers_to_drop {
-            self.buffers.remove(id);
         }
 
         ExecutionPlan {
@@ -198,51 +166,6 @@ impl BufferPlannerCore {
             InferenceMode::File => count >= self.config.file_max,
         }
     }
-
-    pub fn reset(&mut self) {
-        self.buffers.clear();
-        self.next_id = 0;
-    }
-
-    fn prune_stale_buffers(&mut self, current_time: f64) {
-        self.buffers.retain(|_, meta| {
-            (current_time - meta.last_seen) <= self.timeout_seconds
-        });
-    }
-}
-
-#[derive(Debug)]
-#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
-pub struct BufferPlanner {
-    core: std::sync::Mutex<BufferPlannerCore>,
-}
-
-#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
-impl BufferPlanner {
-    #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
-    pub fn new(config: BufferConfig) -> Self {
-        Self {
-            core: std::sync::Mutex::new(BufferPlannerCore::new(config)),
-        }
-    }
-
-    pub fn register_roi(&self, target_roi: Rect, timestamp: f64) -> BufferAction {
-        self.core.lock().unwrap().register_roi(target_roi, timestamp)
-    }
-
-    pub fn poll(
-        &self, 
-        current_counts: HashMap<String, u32>, 
-        mode: InferenceMode, 
-        has_state: bool, 
-        flush: bool
-    ) -> ExecutionPlan {
-        self.core.lock().unwrap().poll(&current_counts, mode, has_state, flush)
-    }
-
-    pub fn reset(&self) {
-        self.core.lock().unwrap().reset()
-    }
 }
 
 #[cfg(test)]
@@ -260,7 +183,20 @@ mod tests {
         }
     }
 
-    // --- Configuration Tests ---
+    /// Helper to easily construct metadata for tests
+    fn meta(id: &str, count: u32, created_at: f64, last_seen: f64) -> BufferMetadata {
+        BufferMetadata {
+            id: id.to_string(),
+            roi: Rect::new(0.0, 0.0, 10.0, 10.0),
+            count,
+            created_at,
+            last_seen,
+        }
+    }
+
+    // ==========================================
+    // Configuration Tests
+    // ==========================================
 
     #[test]
     fn test_buffer_config_math() {
@@ -283,92 +219,89 @@ mod tests {
         assert_eq!(buf_cfg.stream_max, 144); // 150.min(144)
     }
 
-    // --- ROI Registration Tests ---
+    // ==========================================
+    // Stateless Target Evaluation Tests
+    // ==========================================
 
     #[test]
-    fn test_register_roi_creates_new() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
+    fn test_evaluate_target_creates_new_when_empty() {
+        let planner = BufferPlanner::new(mock_config());
         let roi = Rect::new(0.0, 0.0, 100.0, 100.0);
         
-        let res = mgr.register_roi(roi, 1.0);
+        let res = planner.evaluate_target(roi, 1.0, vec![]);
         
         assert_eq!(res.action, BufferActionType::Create);
-        assert_eq!(res.id, "buf_0");
+        assert!(res.matched_id.is_none());
         assert!(res.roi.is_some());
     }
 
     #[test]
-    fn test_register_roi_keeps_alive() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
+    fn test_evaluate_target_keeps_alive_on_match() {
+        let planner = BufferPlanner::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         let roi2 = Rect::new(5.0, 5.0, 100.0, 100.0); // High overlap (IoU)
+        
+        let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
 
-        mgr.register_roi(roi1, 1.0); 
-        let res = mgr.register_roi(roi2, 1.1); 
+        let res = planner.evaluate_target(roi2, 1.1, active);
 
         assert_eq!(res.action, BufferActionType::KeepAlive);
-        assert_eq!(res.id, "buf_0");
+        assert_eq!(res.matched_id.unwrap(), "b1");
         assert!(res.roi.is_none());
     }
 
     #[test]
-    fn test_register_roi_low_iou_creates_new() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
+    fn test_evaluate_target_low_iou_creates_new() {
+        let planner = BufferPlanner::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         let roi2 = Rect::new(500.0, 500.0, 100.0, 100.0); // No overlap
+        
+        let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
 
-        let res1 = mgr.register_roi(roi1, 1.0);
-        let res2 = mgr.register_roi(roi2, 2.0);
+        let res = planner.evaluate_target(roi2, 1.1, active);
 
-        assert_eq!(res1.action, BufferActionType::Create);
-        assert_eq!(res2.action, BufferActionType::Create);
-        assert_ne!(res1.id, res2.id); // Should be buf_0 and buf_1
+        assert_eq!(res.action, BufferActionType::Create);
+        assert!(res.matched_id.is_none());
     }
 
     #[test]
-    fn test_register_roi_prunes_stale() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        let roi = Rect::new(0.0, 0.0, 100.0, 100.0);
+    fn test_evaluate_target_ignores_stale_buffers() {
+        let planner = BufferPlanner::new(mock_config());
+        let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         
-        mgr.register_roi(roi, 1.0); // Creates buf_0, last_seen = 1.0
+        // This buffer has not been seen in 10 seconds (timeout is 5.0)
+        let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
+
+        // Evaluate at timestamp 11.0
+        let res = planner.evaluate_target(roi1, 11.0, active);
         
-        // timeout_seconds is 5.0. 
-        // Polling at 7.0 means (7.0 - 1.0) = 6.0 > 5.0, so buf_0 is stale and gets pruned.
-        let res = mgr.register_roi(roi, 7.0); 
-        
-        assert_eq!(res.action, BufferActionType::Create);
-        assert_eq!(res.id, "buf_1"); // Must be a new ID since buf_0 was dropped
+        assert_eq!(res.action, BufferActionType::Create, "Should ignore stale buffer and create new");
     }
 
-    // --- Execution Polling & Threshold Tests ---
+    // ==========================================
+    // Stateless Execution Polling Tests
+    // ==========================================
 
     #[test]
     fn test_file_mode_wait_logic() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
+        let planner = BufferPlanner::new(mock_config());
 
-        let mut counts = HashMap::new();
-        
-        counts.insert("buf_0".to_string(), 100);
-        let plan = mgr.poll(&counts, InferenceMode::File, false, false);
-        assert!(plan.command.is_none()); // 100 < file_max (900)
+        // Under limit
+        let plan1 = planner.poll(vec![meta("b1", 100, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
+        assert!(plan1.command.is_none()); // 100 < file_max (900)
 
-        counts.insert("buf_0".to_string(), 900);
-        let plan = mgr.poll(&counts, InferenceMode::File, false, false);
-        assert!(plan.command.is_some());
-        assert_eq!(plan.command.unwrap().take_count, 900);
+        // Over limit
+        let plan2 = planner.poll(vec![meta("b1", 900, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
+        assert!(plan2.command.is_some());
+        assert_eq!(plan2.command.unwrap().take_count, 900);
     }
 
     #[test]
     fn test_file_mode_flush() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
-
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 20);
+        let planner = BufferPlanner::new(mock_config());
         
-        // Force flush override
-        let plan = mgr.poll(&counts, InferenceMode::File, false, true);
+        // Force flush override with only 20 frames (limit is 900)
+        let plan = planner.poll(vec![meta("b1", 20, 1.0, 1.0)], 1.0, InferenceMode::File, false, true);
         
         assert!(plan.command.is_some());
         assert_eq!(plan.command.unwrap().take_count, 20);
@@ -376,108 +309,86 @@ mod tests {
 
     #[test]
     fn test_stream_mode_latency() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 100.0, 100.0), 1.0); 
-
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 16);
-        
-        let plan = mgr.poll(&counts, InferenceMode::Stream, false, false);
+        let planner = BufferPlanner::new(mock_config());
+        let plan = planner.poll(vec![meta("b1", 16, 1.0, 1.0)], 1.0, InferenceMode::Stream, false, false);
         assert!(plan.command.is_some());
     }
 
     #[test]
     fn test_stream_mode_cap_take_count() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
+        let planner = BufferPlanner::new(mock_config());
         
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 200); // Exceeds stream_max (150)
-        
-        let plan = mgr.poll(&counts, InferenceMode::Stream, false, false);
+        // 200 exceeds stream_max (150)
+        let plan = planner.poll(vec![meta("b1", 200, 1.0, 1.0)], 1.0, InferenceMode::Stream, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.take_count, 150); 
     }
 
     #[test]
     fn test_file_mode_cap_take_count() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
+        let planner = BufferPlanner::new(mock_config());
         
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 1000); // Exceeds file_max (900)
-        
-        let plan = mgr.poll(&counts, InferenceMode::File, false, false);
+        // 1000 exceeds file_max (900)
+        let plan = planner.poll(vec![meta("b1", 1000, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.take_count, 900);
     }
 
     #[test]
     fn test_stateful_inference_threshold() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
+        let planner = BufferPlanner::new(mock_config()); // min_no_state = 16, min_with_state = 4
         
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 5); // min_no_state = 16, min_with_state = 4
+        let active = vec![meta("b1", 5, 1.0, 1.0)];
         
-        let plan_no_state = mgr.poll(&counts, InferenceMode::Stream, false, false);
+        let plan_no_state = planner.poll(active.clone(), 1.0, InferenceMode::Stream, false, false);
         assert!(plan_no_state.command.is_none()); // 5 < 16, so it waits
         
-        let plan_with_state = mgr.poll(&counts, InferenceMode::Stream, true, false);
+        let plan_with_state = planner.poll(active, 1.0, InferenceMode::Stream, true, false);
         assert!(plan_with_state.command.is_some()); // 5 >= 4, so it executes
     }
 
     #[test]
     fn test_overlap_keep_count() {
-        let mut mgr = BufferPlannerCore::new(mock_config()); // overlap = 3
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
-        
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 20);
-        
-        let plan = mgr.poll(&counts, InferenceMode::Stream, false, false);
+        let planner = BufferPlanner::new(mock_config()); // overlap = 3
+        let plan = planner.poll(vec![meta("b1", 20, 1.0, 1.0)], 1.0, InferenceMode::Stream, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.keep_count, 3);
     }
 
     #[test]
     fn test_poll_multiple_buffers_prioritizes_newest_and_drops_older() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
+        let planner = BufferPlanner::new(mock_config());
         
-        // Register multiple buffers over time
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);     // buf_0 (Oldest)
-        mgr.register_roi(Rect::new(500.0, 500.0, 10.0, 10.0), 2.0); // buf_1
-        mgr.register_roi(Rect::new(1000.0, 1000.0, 10.0, 10.0), 3.0); // buf_2 (Newest)
+        let active = vec![
+            meta("b1", 20, 1.0, 5.0), // Oldest
+            meta("b2", 20, 2.0, 5.0), // Middle
+            meta("b3", 20, 3.0, 5.0), // Newest
+        ];
         
-        let mut counts = HashMap::new();
-        counts.insert("buf_0".to_string(), 20); 
-        counts.insert("buf_1".to_string(), 20); 
-        counts.insert("buf_2".to_string(), 20); 
-        
-        // The Core sorts b.created_at.cmp(a.created_at), so newest wins.
-        let plan = mgr.poll(&counts, InferenceMode::Stream, false, false);
+        let plan = planner.poll(active, 5.0, InferenceMode::Stream, false, false);
         
         let cmd = plan.command.unwrap();
-        assert_eq!(cmd.buffer_id, "buf_2"); // Newest should be prioritized
+        assert_eq!(cmd.buffer_id, "b3"); // Newest wins
         
-        // Since buf_2 is the winner, any ready buffers older than it (0 and 1) 
-        // should be moved to the drop list to avoid processing stale data.
+        // Any ready buffers older than the winner should be dropped
         assert_eq!(plan.buffers_to_drop.len(), 2);
-        assert!(plan.buffers_to_drop.contains(&"buf_0".to_string()));
-        assert!(plan.buffers_to_drop.contains(&"buf_1".to_string()));
+        assert!(plan.buffers_to_drop.contains(&"b1".to_string()));
+        assert!(plan.buffers_to_drop.contains(&"b2".to_string()));
     }
 
-    // --- State Management ---
-
     #[test]
-    fn test_reset_clears_state() {
-        let mut mgr = BufferPlannerCore::new(mock_config());
-        mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 1.0); // creates buf_0
+    fn test_poll_drops_stale_buffers_even_when_no_winner() {
+        let planner = BufferPlanner::new(mock_config());
         
-        mgr.reset();
+        let active = vec![
+            meta("b1", 2, 10.0, 10.0), // Fresh, but not enough frames (2 < 16)
+            meta("b2", 2, 1.0, 1.0)    // Stale (Current time 10.0 - 1.0 = 9.0 > 5.0)
+        ]; 
         
-        let res = mgr.register_roi(Rect::new(0.0, 0.0, 10.0, 10.0), 2.0); 
-        assert_eq!(res.action, BufferActionType::Create);
-        assert_eq!(res.id, "buf_0"); // Counter should be back to 0
+        let plan = planner.poll(active, 10.0, InferenceMode::Stream, false, false);
+        
+        assert!(plan.command.is_none()); // Nobody wins
+        assert_eq!(plan.buffers_to_drop.len(), 1);
+        assert_eq!(plan.buffers_to_drop[0], "b2"); // Stale is culled
     }
 }

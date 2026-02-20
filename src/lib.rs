@@ -38,6 +38,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<types::BufferConfig>()?;
     m.add_class::<types::BufferActionType>()?;
     m.add_class::<types::BufferAction>()?;
+    m.add_class::<types::BufferMetadata>()?;
     m.add_class::<types::InferenceCommand>()?;
     m.add_class::<types::ExecutionPlan>()?;
 

@@ -153,8 +153,19 @@ pub enum BufferActionType {
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct BufferAction {
     pub action: BufferActionType,
-    pub id: String,
+    pub matched_id: Option<String>,
     pub roi: Option<Rect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct BufferMetadata {
+    pub id: String,
+    pub roi: Rect,
+    pub count: u32,
+    pub created_at: f64,
+    pub last_seen: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -238,6 +249,15 @@ impl InputChunk {
         face: Option<FaceInput>
     ) -> Self {
         Self { timestamp, signals, confidences, face }
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl BufferMetadata {
+    #[new]
+    fn py_new(id: String, roi: Rect, count: u32, created_at: f64, last_seen: f64) -> Self {
+        Self { id, roi, count, created_at, last_seen }
     }
 }
 
