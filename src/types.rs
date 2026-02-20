@@ -17,40 +17,57 @@ pub struct SessionConfig {
     pub roi_method: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
-#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
-    }
-}
-
 // --- INPUTS ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct SignalInput {
+    pub data: Vec<f32>,
+    pub confidence: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct FaceInput {
-    pub coordinates: Vec<f32>, 
-    pub confidence: f32,
+    pub coordinates: Vec<Vec<f32>>, 
+    pub confidence: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct InputChunk {
-    pub timestamp: Vec<f64>,
-    pub signals: HashMap<String, Vec<f32>>,
-    pub confidences: HashMap<String, Vec<f32>>,
-    pub face: Option<FaceInput>, 
+    pub face: Option<FaceInput>,
+    pub signals: HashMap<String, SignalInput>,
+    pub timestamp: Vec<f64>, 
+}
+
+impl InputChunk {
+    pub fn validate_lengths(&self) -> Result<usize, String> {
+        let expected_len = self.timestamp.len();
+
+        if let Some(face) = &self.face {
+            if face.coordinates.len() != expected_len {
+                return Err(format!("Length mismatch: face.coordinates has length {}, expected {}", face.coordinates.len(), expected_len));
+            }
+            if face.confidence.len() != expected_len {
+                return Err(format!("Length mismatch: face.confidence has length {}, expected {}", face.confidence.len(), expected_len));
+            }
+        }
+
+        for (name, sig) in &self.signals {
+            if sig.data.len() != expected_len {
+                return Err(format!("Length mismatch: signals[{}].data has length {}, expected {}", name, sig.data.len(), expected_len));
+            }
+            if sig.confidence.len() != expected_len {
+                return Err(format!("Length mismatch: signals[{}].confidence has length {}, expected {}", name, sig.confidence.len(), expected_len));
+            }
+        }
+
+        Ok(expected_len)
+    }
 }
 
 // --- ENUMS ---
@@ -86,6 +103,22 @@ impl<'source> FromPyObject<'source> for WaveformMode {
 }
 
 // --- ROI CONFIGURATION ---
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct Rect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Rect {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
@@ -231,9 +264,18 @@ impl SessionConfig {
 
 #[cfg(feature = "python")]
 #[pymethods]
+impl SignalInput {
+    #[new]
+    fn new(data: Vec<f32>, confidence: Vec<f32>) -> Self {
+        Self { data, confidence }
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
 impl FaceInput {
     #[new]
-    fn new(coordinates: Vec<f32>, confidence: f32) -> Self {
+    fn new(coordinates: Vec<Vec<f32>>, confidence: Vec<f32>) -> Self {
         Self { coordinates, confidence }
     }
 }
@@ -242,13 +284,13 @@ impl FaceInput {
 #[pymethods]
 impl InputChunk {
     #[new]
+    #[pyo3(signature = (face, signals, timestamp))]
     fn new(
-        timestamp: Vec<f64>,
-        signals: HashMap<String, Vec<f32>>,
-        confidences: HashMap<String, Vec<f32>>,
-        face: Option<FaceInput>
+        face: Option<FaceInput>,
+        signals: HashMap<String, SignalInput>,
+        timestamp: Vec<f64>
     ) -> Self {
-        Self { timestamp, signals, confidences, face }
+        Self { face, signals, timestamp }
     }
 }
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput};
+use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, SignalResult, FaceResult, FaceInput, SignalInput};
 use crate::state::series::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
@@ -64,9 +64,21 @@ impl SessionCore {
     }
 
     fn process_chunk(&mut self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+        if let Err(msg) = chunk.validate_lengths() {
+            log::error!("[Session] Data mismatch: {}", msg);
+            return SessionResult {
+                timestamp: Vec::new(),
+                face: None,
+                signals: HashMap::new(),
+                fps: self.config.fps_target,
+                message: msg,
+            };
+        }
+
+        let chunk_len = chunk.timestamp.len();
         let overlap = self.merge_timestamps(&chunk.timestamp);
-        self.merge_signals(chunk.signals, chunk.confidences, overlap);
-        self.merge_face(chunk.face, overlap, chunk.timestamp.len());
+        self.merge_signals(chunk.signals, overlap);
+        self.merge_face(chunk.face, overlap, chunk_len);
         if !matches!(mode, WaveformMode::Global) {
             self.prune_state();
         }
@@ -97,35 +109,41 @@ impl SessionCore {
         }
     }
 
-    fn merge_signals(&mut self, signals: HashMap<String, Vec<f32>>, confidences: HashMap<String, Vec<f32>>, overlap: usize) {
-        for (key, data) in signals {
+    fn merge_signals(&mut self, signals: HashMap<String, SignalInput>, overlap: usize) {
+        for (key, input) in signals {
             let data_buf = self.signal_data.entry(key.clone()).or_insert_with(SignalBuffer::new);
-            data_buf.merge(&data, overlap, Some("unitless".to_string()));
+            data_buf.merge(&input.data, overlap, Some("unitless".to_string())); // TODO: Only unitless for waveforms
 
-            if let Some(conf_data) = confidences.get(&key) {
-                let conf_buf = self.signal_confs.entry(key).or_insert_with(SignalBuffer::new);
-                conf_buf.merge(conf_data, overlap, None);
-            }
+            let conf_buf = self.signal_confs.entry(key).or_insert_with(SignalBuffer::new);
+            conf_buf.merge(&input.confidence, overlap, None);
         }
     }
 
     fn merge_face(&mut self, face: Option<FaceInput>, overlap: usize, chunk_len: usize) {
-        let (coords_vec, conf) = match face {
-            Some(f) => (f.coordinates, f.confidence),
-            None => (vec![0.0; 4], 0.0)
-        };
-        
-        let coords: [f32; 4] = if coords_vec.len() == 4 {
-            [coords_vec[0], coords_vec[1], coords_vec[2], coords_vec[3]]
-        } else {
-            [0.0; 4]
-        };
-
         let new_frames_count = if chunk_len > overlap { chunk_len - overlap } else { 0 };
+        if new_frames_count == 0 { return; }
 
-        for _ in 0..new_frames_count {
-            self.face_coords.push(coords);
-            self.face_conf.push(conf);
+        let start_idx = overlap;
+
+        match face {
+            Some(f) => {
+                for i in start_idx..chunk_len {
+                    let coords_vec = &f.coordinates[i];
+                    let coords: [f32; 4] = if coords_vec.len() >= 4 {
+                        [coords_vec[0], coords_vec[1], coords_vec[2], coords_vec[3]]
+                    } else {
+                        [0.0; 4]
+                    };
+                    self.face_coords.push(coords);
+                    self.face_conf.push(f.confidence[i]);
+                }
+            },
+            None => {
+                for _ in 0..new_frames_count {
+                    self.face_coords.push([0.0; 4]);
+                    self.face_conf.push(0.0);
+                }
+            }
         }
     }
 
@@ -148,7 +166,6 @@ impl SessionCore {
 
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-        // Clone vital IDs to avoid borrowing issues while iterating
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
         for vital_id in vital_ids {
@@ -238,17 +255,15 @@ impl SessionCore {
                     let (val, conf) = match &cfg.method {
                         CalculationMethod::Rate(strategy) => {
                             let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
-                            // Use rate hint from previously calculated Heart Rate if available
                             let hint = results.get("heart_rate").map(|(v, _)| *v);
                             
                             let res = crate::signal::rate::estimate_rate(
                                 inputs[0], actual_fs, bounds, *strategy, hint, Some(&mut self.fft_scratch)
-                            );                                    
+                            );
                             (res.value, slice_avg_conf)
                         },
                         CalculationMethod::HrvFromPeaks(metric) => {
                             let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
-                            // Get HR bounds from registry to ensure consistency
                             let bounds = if let Some(hr_meta) = registry::get_vital_meta("heart_rate") {
                                 let d = &hr_meta.derivations[0];
                                 SignalBounds { min_rate: d.min_value, max_rate: d.max_value }
@@ -301,7 +316,6 @@ impl SessionCore {
 
                     if val >= cfg.min_value && val <= cfg.max_value {
                         results.insert(vital_id.clone(), (val, conf));
-                        // Break derivation loop for this vital (successful)
                         break; 
                     }
                 }

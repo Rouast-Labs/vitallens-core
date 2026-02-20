@@ -75,8 +75,10 @@ fn test_ie_ratio_accuracy(resource: &str) {
 
         let chunk = InputChunk {
             timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fps as f64).collect(),
-            signals: [("respiratory_waveform".to_string(), resp.data)].into(),
-            confidences: [("respiratory_waveform".to_string(), conf)].into(),
+            signals: [("respiratory_waveform".to_string(), vitallens_core::types::SignalInput { 
+                data: resp.data, 
+                confidence: conf 
+            })].into(),
             face: None,
         };
 

@@ -37,7 +37,6 @@ class VitalLensProcessor {
     private var session: Session
 
     init() {
-        // 1. Initialize the Session
         let config = SessionConfig(
             supportedVitals: ["heart_rate", "hrv_sdnn"],
             fpsTarget: 30.0,
@@ -48,21 +47,26 @@ class VitalLensProcessor {
         self.session = Session(config: config)
     }
 
-    // 2. Process frame chunks
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         
         // Example: Perform ML Inference (CoreML) to get your raw PPG/Resp signals
-        let signals: [String: [Float]] = ["ppg_waveform": [0.12, 0.15, 0.14, 0.11, 0.09]]
-        let confidence: [String: [Float]] = ["ppg_waveform": [0.98, 0.98, 0.97, 0.99, 0.98]]
+        let ppgData: [Float] = [0.12, 0.15, 0.14, 0.11, 0.09]
+        let ppgConf: [Float] = [0.98, 0.98, 0.97, 0.99, 0.98]
         
+        // Construct the strict SignalInput
+        let ppgSignal = SignalInput(data: ppgData, confidence: ppgConf)
+        
+        // Construct the InputChunk
         let chunk = InputChunk(
-            timestamp: [CACurrentMediaTime(), /* ... */],
-            signals: signals,
-            confidences: confidence,
-            face: FaceInput(coordinates: [0.1, 0.1, 0.5, 0.5], confidence: 0.99)
+            face: FaceInput(
+                coordinates: [[0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5], /*...*/], 
+                confidence: [0.99, 0.98, /*...*/]
+            ),
+            signals: ["ppg_waveform": ppgSignal],
+            timestamp: [CACurrentMediaTime(), /* ... */]
         )
 
-        // 3. Get smoothed/derived results
+        // Get smoothed/derived results
         let result = session.processChunk(chunk: chunk, mode: .incremental)
         
         if let hr = result.signals["heart_rate"]?.value {

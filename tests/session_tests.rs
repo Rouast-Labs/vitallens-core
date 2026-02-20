@@ -260,27 +260,35 @@ fn run_session_extraction(
         
         let ts_slice = &global_timestamps[start..end];
         let mut signal_map = HashMap::new();
-        let mut confidence_map = HashMap::new();
 
         for case in cases {
             if start < case.input_data.len() {
                 let case_end = (start + chunk_size).min(case.input_data.len());
                 if case_end > start {
                     let slice_data = &case.input_data[start..case_end];
-                    signal_map.insert(case.input_signal_key.clone(), slice_data.to_vec());
-
                     let slice_conf = &case.input_confidence[start..case_end];
-                    confidence_map.insert(case.input_signal_key.clone(), slice_conf.to_vec());
+                    signal_map.insert(
+                        case.input_signal_key.clone(),
+                        vitallens_core::types::SignalInput {
+                            data: slice_data.to_vec(),
+                            confidence: slice_conf.to_vec(),
+                        }
+                    );
                 }
             }
         }
 
         let face_input = if let Some(face_ref) = &ref_data.face {
             if start < face_ref.coordinates.len() {
-                Some(FaceInput {
-                    coordinates: face_ref.coordinates[start].clone(),
-                    confidence: face_ref.confidence[start],
-                })
+                let case_end = (start + chunk_size).min(face_ref.coordinates.len());
+                if case_end > start {
+                    Some(FaceInput {
+                        coordinates: face_ref.coordinates[start..case_end].to_vec(),
+                        confidence: face_ref.confidence[start..case_end].to_vec(),
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -291,7 +299,6 @@ fn run_session_extraction(
         let chunk = InputChunk {
             timestamp: ts_slice.to_vec(),
             signals: signal_map,
-            confidences: confidence_map,
             face: face_input,
         };
 
@@ -308,7 +315,9 @@ fn run_session_extraction(
                 }
                 
                 if let Some(last_coords) = face_res.coordinates.last() {
-                     let input_coords = &ref_data.face.as_ref().unwrap().coordinates[start];
+                     let end_idx = end - 1;
+                     let input_coords = &ref_data.face.as_ref().unwrap().coordinates[end_idx];
+                     
                      if !last_coords.is_empty() && !input_coords.is_empty() {
                          assert!((last_coords[0] - input_coords[0]).abs() < 1.0, 
                              "Face coordinate drift detected: Input {:?} vs Output {:?}", input_coords, last_coords);

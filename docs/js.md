@@ -38,10 +38,10 @@ Because Wasm handles memory boundaries strictly, we pass plain JSON objects from
 import init, { Session } from 'vitallens_core';
 
 async function startVitalLens() {
-    // 1. Initialize the Wasm memory module (Required before using the library)
+    // 1. Initialize the Wasm memory module
     await init(); 
 
-    // 2. Define your configuration matching the SessionConfig Rust struct
+    // 2. Define your configuration
     const config = {
         supported_vitals: ["heart_rate", "respiratory_rate"],
         fps_target: 30.0,
@@ -52,16 +52,22 @@ async function startVitalLens() {
 
     const session = new Session(config);
 
-    // 3. Inside your video loop (e.g., requestAnimationFrame or a Web Worker)
+    // 3. Inside your video loop
     function processFrame(videoTimestamp, ppgArray) {
         const chunk = {
-            timestamp: [videoTimestamp],
-            signals: { "ppg_waveform": ppgArray },
-            confidences: { "ppg_waveform": [0.95] },
-            face: { coordinates: [0.1, 0.1, 0.2, 0.2], confidence: 1.0 }
+            timestamp: [videoTimestamp], // Must be an array of numbers
+            signals: { 
+                "ppg_waveform": { 
+                    data: ppgArray, 
+                    confidence: [0.95] // Must match length of data
+                } 
+            },
+            face: { 
+                coordinates: [[0.1, 0.1, 0.2, 0.2]], // Array of bounding boxes
+                confidence: [1.0]                    // Array of confidences
+            }
         };
 
-        // Note: Call `processChunkJs` explicitly for the JS/Wasm target
         const result = session.processChunkJs(chunk, "Incremental");
 
         if (result.signals.heart_rate && result.signals.heart_rate.value) {

@@ -18,22 +18,23 @@ config = vc.SessionConfig(
 )
 session = vc.Session(config)
 
+# Constructing the inputs
+ppg_signal = vc.SignalInput(
+    data=[0.1, 0.2, 0.3], 
+    confidence=[1.0, 1.0, 1.0]
+)
+
+face_input = vc.FaceInput(
+    coordinates=[[0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5]],
+    confidence=[0.9, 0.9, 0.9]
+)
+
+chunk = vc.InputChunk(
+    face=face_input,
+    signals={"ppg_waveform": ppg_signal},
+    timestamp=[1.0, 1.033, 1.066]
+)
+
 # Incremental processing
 result = session.process_chunk(chunk, mode="Incremental")
-```
-
-## Stateless Usage (Research/Jupyter)
-
-Direct access to the DSP engine without the state machine.
-
-```python
-import numpy as np
-import vitallens_core as vc
-
-# Example: Estimate HR from a raw numpy array
-signal = np.random.randn(300).astype(np.float32)
-bpm, conf = vc.estimate_heart_rate(signal, fs=30.0)
-
-# Example: Find peaks with refined quadratic interpolation
-peaks = vc.find_peaks(signal, fs=30.0, refine=True)
 ```

@@ -34,6 +34,11 @@ impl BufferConfig {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
+pub fn compute_buffer_config(config: SessionConfig) -> BufferConfig {
+    BufferConfig::from_session_config(&config)
+}
+
 #[derive(Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
 pub struct BufferPlanner {
