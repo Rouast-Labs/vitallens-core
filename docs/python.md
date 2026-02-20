@@ -29,12 +29,12 @@ face_input = vc.FaceInput(
     confidence=[0.9, 0.9, 0.9]
 )
 
-chunk = vc.InputChunk(
+input = vc.SessionInput(
     face=face_input,
     signals={"ppg_waveform": ppg_signal},
     timestamp=[1.0, 1.033, 1.066]
 )
 
 # Incremental processing
-result = session.process_chunk(chunk, mode="Incremental")
+result = session.process(input, mode="Incremental")
 ```

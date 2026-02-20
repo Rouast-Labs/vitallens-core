@@ -56,8 +56,8 @@ class VitalLensProcessor {
         // Construct the strict SignalInput
         let ppgSignal = SignalInput(data: ppgData, confidence: ppgConf)
         
-        // Construct the InputChunk
-        let chunk = InputChunk(
+        // Construct the SessionInput
+        let input = SessionInput(
             face: FaceInput(
                 coordinates: [[0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5], /*...*/], 
                 confidence: [0.99, 0.98, /*...*/]
@@ -67,7 +67,7 @@ class VitalLensProcessor {
         )
 
         // Get smoothed/derived results
-        let result = session.processChunk(chunk: chunk, mode: .incremental)
+        let result = session.process(input: input, mode: .incremental)
         
         if let hr = result.signals["heart_rate"]?.value {
             print("Current Heart Rate: \(hr) BPM")

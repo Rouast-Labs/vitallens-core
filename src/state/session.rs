@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
-use crate::types::{InputChunk, SessionConfig, SessionResult, WaveformMode, WaveformResult, VitalResult, FaceResult, FaceInput, SignalInput};
+use crate::types::{SessionInput, SessionConfig, SessionResult, WaveformMode, WaveformResult, VitalResult, FaceResult, FaceInput, SignalInput};
 use crate::state::series::SignalBuffer;
 use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
 use crate::signal::fft::FftScratch;
@@ -63,8 +63,8 @@ impl SessionCore {
         }
     }
 
-    fn process_chunk(&mut self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
-        if let Err(msg) = chunk.validate_lengths() {
+    fn process(&mut self, input: SessionInput, mode: WaveformMode) -> SessionResult {
+        if let Err(msg) = input.validate_lengths() {
             log::error!("[Session] Data mismatch: {}", msg);
             return SessionResult {
                 timestamp: Vec::new(),
@@ -76,10 +76,10 @@ impl SessionCore {
             };
         }
 
-        let chunk_len = chunk.timestamp.len();
-        let overlap = self.merge_timestamps(&chunk.timestamp);
-        self.merge_signals(chunk.signals, overlap);
-        self.merge_face(chunk.face, overlap, chunk_len);
+        let input_len = input.timestamp.len();
+        let overlap = self.merge_timestamps(&input.timestamp);
+        self.merge_signals(input.signals, overlap);
+        self.merge_face(input.face, overlap, input_len);
         if !matches!(mode, WaveformMode::Global) {
             self.prune_state();
         }
@@ -120,15 +120,15 @@ impl SessionCore {
         }
     }
 
-    fn merge_face(&mut self, face: Option<FaceInput>, overlap: usize, chunk_len: usize) {
-        let new_frames_count = if chunk_len > overlap { chunk_len - overlap } else { 0 };
+    fn merge_face(&mut self, face: Option<FaceInput>, overlap: usize, input_len: usize) {
+        let new_frames_count = if input_len > overlap { input_len - overlap } else { 0 };
         if new_frames_count == 0 { return; }
 
         let start_idx = overlap;
 
         match face {
             Some(f) => {
-                for i in start_idx..chunk_len {
+                for i in start_idx..input_len {
                     let coords_vec = &f.coordinates[i];
                     let coords: [f32; 4] = if coords_vec.len() >= 4 {
                         [coords_vec[0], coords_vec[1], coords_vec[2], coords_vec[3]]
@@ -476,9 +476,9 @@ impl Session {
         }
     }
 
-    pub fn process_chunk(&self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+    pub fn process(&self, input: SessionInput, mode: WaveformMode) -> SessionResult {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
-        guard.process_chunk(chunk, mode)
+        guard.process(input, mode)
     }
 }
 
@@ -492,10 +492,10 @@ impl Session {
         }
     }
 
-    #[pyo3(name = "process_chunk")]
-    pub fn py_process_chunk(&self, chunk: InputChunk, mode: WaveformMode) -> SessionResult {
+    #[pyo3(name = "process")]
+    pub fn py_process(&self, input: SessionInput, mode: WaveformMode) -> SessionResult {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
-        guard.process_chunk(chunk, mode)
+        guard.process(input, mode)
     }
 }
 
@@ -510,12 +510,12 @@ impl Session {
         })
     }
 
-    #[wasm_bindgen(js_name = processChunkJs)]
-    pub fn process_chunk_js(&self, chunk_val: JsValue, mode_val: JsValue) -> Result<JsValue, JsError> {
-        let chunk: InputChunk = serde_wasm_bindgen::from_value(chunk_val)?;
+    #[wasm_bindgen(js_name = processJs)]
+    pub fn process_js(&self, input_val: JsValue, mode_val: JsValue) -> Result<JsValue, JsError> {
+        let input: SessionInput = serde_wasm_bindgen::from_value(input_val)?;
         let mode: WaveformMode = serde_wasm_bindgen::from_value(mode_val)?;
         
-        let result = self.process_chunk(chunk, mode);  
+        let result = self.process(input, mode);  
         
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }

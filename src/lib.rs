@@ -8,7 +8,7 @@ pub mod geometry;
 mod bindings;
 
 pub use state::session::Session;
-pub use types::{SessionConfig, InputChunk, WaveformMode, SessionResult};
+pub use types::{SessionConfig, SessionInput, WaveformMode, SessionResult};
 
 #[cfg(not(target_arch = "wasm32"))]
 uniffi::setup_scaffolding!();
@@ -23,7 +23,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
 
     m.add_class::<types::SessionConfig>()?;
-    m.add_class::<types::InputChunk>()?;
+    m.add_class::<types::SessionInput>()?;
     m.add_class::<types::SignalInput>()?;
     m.add_class::<types::FaceInput>()?;
     m.add_class::<types::SessionResult>()?;

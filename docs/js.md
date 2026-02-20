@@ -54,7 +54,7 @@ async function startVitalLens() {
 
     // 3. Inside your video loop
     function processFrame(videoTimestamp, ppgArray) {
-        const chunk = {
+        const input = {
             timestamp: [videoTimestamp], // Must be an array of numbers
             signals: { 
                 "ppg_waveform": { 
@@ -68,7 +68,7 @@ async function startVitalLens() {
             }
         };
 
-        const result = session.processChunkJs(chunk, "Incremental");
+        const result = session.processJs(input, "Incremental");
 
         if (result.signals.heart_rate && result.signals.heart_rate.value) {
             console.log(`Heart Rate: ${result.signals.heart_rate.value} BPM`);

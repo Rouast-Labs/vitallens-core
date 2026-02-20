@@ -39,13 +39,13 @@ pub struct FaceInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
-pub struct InputChunk {
+pub struct SessionInput {
     pub face: Option<FaceInput>,
     pub signals: HashMap<String, SignalInput>,
     pub timestamp: Vec<f64>, 
 }
 
-impl InputChunk {
+impl SessionInput {
     pub fn validate_lengths(&self) -> Result<usize, String> {
         let expected_len = self.timestamp.len();
 
@@ -299,7 +299,7 @@ impl FaceInput {
 
 #[cfg(feature = "python")]
 #[pymethods]
-impl InputChunk {
+impl SessionInput {
     #[new]
     #[pyo3(signature = (face, signals, timestamp))]
     fn new(

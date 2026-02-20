@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::Deserialize;
 use test_generator::test_resources;
 
-use vitallens_core::{Session, SessionConfig, InputChunk, WaveformMode};
+use vitallens_core::{Session, SessionConfig, SessionInput, WaveformMode};
 use vitallens_core::registry;
 use vitallens_core::types::FaceInput;
 
@@ -241,7 +241,7 @@ fn run_session_extraction(
         base + jitter
     }).collect();
 
-    let (chunk_size, step_size) = match mode {
+    let (window_size, step_size) = match mode {
         WaveformMode::Global => (max_len, max_len),
         WaveformMode::Incremental => (15, 12), 
         WaveformMode::Windowed { .. } => (30, 25), 
@@ -251,19 +251,19 @@ fn run_session_extraction(
     let mut waveform_results: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
     let mut start = 0;
 
-    println!(" -> Running Mode: {:?} (Chunk {}, Step {})", mode, chunk_size, step_size);
+    println!(" -> Running Mode: {:?} (Chunk {}, Step {})", mode, window_size, step_size);
 
     while start < max_len {
-        let end = (start + chunk_size).min(max_len);
+        let end = (start + window_size).min(max_len);
         
-        let unique_frames_sent = if start == 0 { end } else { end - (start + chunk_size - step_size) };
+        let unique_frames_sent = if start == 0 { end } else { end - (start + window_size - step_size) };
         
         let ts_slice = &global_timestamps[start..end];
         let mut signal_map = HashMap::new();
 
         for case in cases {
             if start < case.input_data.len() {
-                let case_end = (start + chunk_size).min(case.input_data.len());
+                let case_end = (start + window_size).min(case.input_data.len());
                 if case_end > start {
                     let slice_data = &case.input_data[start..case_end];
                     let slice_conf = &case.input_confidence[start..case_end];
@@ -280,7 +280,7 @@ fn run_session_extraction(
 
         let face_input = if let Some(face_ref) = &ref_data.face {
             if start < face_ref.coordinates.len() {
-                let case_end = (start + chunk_size).min(face_ref.coordinates.len());
+                let case_end = (start + window_size).min(face_ref.coordinates.len());
                 if case_end > start {
                     Some(FaceInput {
                         coordinates: face_ref.coordinates[start..case_end].to_vec(),
@@ -296,13 +296,13 @@ fn run_session_extraction(
             None
         };
 
-        let chunk = InputChunk {
+        let input = SessionInput {
             timestamp: ts_slice.to_vec(),
             signals: signal_map,
             face: face_input,
         };
 
-        let result = session.process_chunk(chunk, mode.clone());
+        let result = session.process(input, mode.clone());
 
         if ref_data.face.is_some() {
             if let Some(face_res) = &result.face {

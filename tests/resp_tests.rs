@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::Deserialize;
 use test_generator::test_resources;
 
-use vitallens_core::{Session, SessionConfig, InputChunk, WaveformMode};
+use vitallens_core::{Session, SessionConfig, SessionInput, WaveformMode};
 use vitallens_core::registry;
 
 const TOLERANCE_IE_RATIO: f32 = 0.15;
@@ -72,7 +72,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
         let session = Session::new(config);
         let conf = resp.confidence.unwrap_or_else(|| vec![1.0; resp.data.len()]);
 
-        let chunk = InputChunk {
+        let input = SessionInput {
             timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fps as f64).collect(),
             signals: [("respiratory_waveform".to_string(), vitallens_core::types::SignalInput { 
                 data: resp.data, 
@@ -81,7 +81,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
             face: None,
         };
 
-        let result = session.process_chunk(chunk, WaveformMode::Global);
+        let result = session.process(input, WaveformMode::Global);
 
         if let Some(res) = result.vitals.get("ie_ratio") {
              
