@@ -378,6 +378,7 @@ impl SessionCore {
         let fs = self.config.fps_target;  
 
         let return_waveforms = self.config.return_waveforms.clone().unwrap_or_default();
+        let is_global = matches!(mode, WaveformMode::Global);
 
         // Process and extract requested waveforms
         for vital_id in return_waveforms {
@@ -412,10 +413,17 @@ impl SessionCore {
                         };
 
                         if !waveform_data.is_empty() {
+                            let note = if is_global {
+                                format!("Global estimate of {} with frame-wise confidence scores using {}.", meta.display_name, self.config.model_name)
+                            } else {
+                                format!("Latest estimate of {} with frame-wise confidence scores using {}.", meta.display_name, self.config.model_name)
+                            };
+
                             waveforms_out.insert(vital_id.clone(), WaveformResult {
                                 data: waveform_data,
                                 confidence: waveform_conf,
                                 unit: meta.unit.clone(),
+                                note,
                             });
                         }
                     }
@@ -427,10 +435,17 @@ impl SessionCore {
         for vital_id in &self.active_vitals {
             if let Some(meta) = self.vital_metas.get(vital_id) {
                 if let Some(&(val, conf_scalar)) = scalar_results.get(vital_id) {
+                    let note = if is_global {
+                        format!("Global estimate of {} with confidence score using {}.", meta.display_name, self.config.model_name)
+                    } else {
+                        format!("Latest estimate of {} with confidence score using {}.", meta.display_name, self.config.model_name)
+                    };
+
                     vitals_out.insert(vital_id.clone(), VitalResult {
                         value: val,
                         confidence: conf_scalar,
                         unit: meta.unit.clone(),
+                        note,
                     });
                 }
             }
@@ -452,7 +467,7 @@ impl SessionCore {
             waveforms: waveforms_out,
             vitals: vitals_out,
             fps: effective_fps,
-            message: "OK".to_string(),
+            message: "The provided values are estimates and should be interpreted according to the provided confidence scores. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.".to_string(),
         }
     }
 }

@@ -43,6 +43,7 @@ async function startVitalLens() {
 
     // 2. Define your configuration
     const config = {
+        model_name: "vitallens-2.0",
         supported_vitals: ["heart_rate", "respiratory_rate"],
         fps_target: 30.0,
         input_size: 100,

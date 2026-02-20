@@ -224,6 +224,7 @@ fn run_session_extraction(
     
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = SessionConfig {
+        model_name: "vitallens-2.0".to_string(),
         supported_vitals,
         return_waveforms: Some(vec!["ppg_waveform".to_string(), "respiratory_waveform".to_string()]),
         fps_target: ref_data.fps,

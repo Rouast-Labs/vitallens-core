@@ -206,6 +206,7 @@ mod tests {
     #[test]
     fn test_buffer_config_math() {
         let config = SessionConfig {
+            model_name: "vitallens-2.0".to_string(),
             supported_vitals: vec![],
             return_waveforms: None,
             fps_target: 30.0,

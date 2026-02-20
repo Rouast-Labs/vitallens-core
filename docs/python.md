@@ -10,6 +10,7 @@ Used in the backend or desktop tools to process streaming data.
 import vitallens_core as vc
 
 config = vc.SessionConfig(
+    model_name="vitallens-2.0",
     supported_vitals=["heart_rate", "hrv_rmssd"],
     fps_target=30.0,
     input_size=100,

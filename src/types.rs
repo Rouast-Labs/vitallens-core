@@ -10,6 +10,7 @@ use pyo3::prelude::*;
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))] 
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
 pub struct SessionConfig {
+    pub model_name: String,
     pub supported_vitals: Vec<String>,
     pub return_waveforms: Option<Vec<String>>,
     pub fps_target: f32,
@@ -42,7 +43,7 @@ pub struct FaceInput {
 pub struct SessionInput {
     pub face: Option<FaceInput>,
     pub signals: HashMap<String, SignalInput>,
-    pub timestamp: Vec<f64>, 
+    pub timestamp: Vec<f64>,
 }
 
 impl SessionInput {
@@ -228,6 +229,7 @@ pub struct WaveformResult {
     pub data: Vec<f32>,
     pub confidence: Vec<f32>,
     pub unit: String,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,6 +239,7 @@ pub struct VitalResult {
     pub value: f32,
     pub confidence: f32,
     pub unit: String,
+    pub note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -266,8 +269,9 @@ pub struct SessionResult {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None))]
+    #[pyo3(signature = (model_name, supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None))]
     fn new(
+        model_name: String,
         supported_vitals: Vec<String>, 
         fps_target: f32, 
         input_size: u64, 
@@ -275,7 +279,7 @@ impl SessionConfig {
         roi_method: String,
         return_waveforms: Option<Vec<String>>
     ) -> Self {
-        Self { supported_vitals, return_waveforms, fps_target, input_size, n_inputs, roi_method }
+        Self { model_name, supported_vitals, return_waveforms, fps_target, input_size, n_inputs, roi_method }
     }
 }
 
