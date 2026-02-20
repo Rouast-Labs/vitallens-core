@@ -38,15 +38,15 @@ struct ReferenceData {
 struct Vitals {
     ppg_waveform: Option<Waveform>,
     respiratory_waveform: Option<Waveform>,
-    heart_rate: Option<ScalarResult>,
-    respiratory_rate: Option<ScalarResult>,
-    hrv_sdnn: Option<ScalarResult>,
-    hrv_rmssd: Option<ScalarResult>,
-    hrv_lfhf: Option<ScalarResult>,
-    hrv_pnn50: Option<ScalarResult>,
-    hrv_sd1sd2: Option<ScalarResult>,
-    ie_ratio: Option<ScalarResult>,
-    stress_index: Option<ScalarResult>,
+    heart_rate: Option<Vital>,
+    respiratory_rate: Option<Vital>,
+    hrv_sdnn: Option<Vital>,
+    hrv_rmssd: Option<Vital>,
+    hrv_lfhf: Option<Vital>,
+    hrv_pnn50: Option<Vital>,
+    hrv_sd1sd2: Option<Vital>,
+    ie_ratio: Option<Vital>,
+    stress_index: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -56,7 +56,7 @@ struct Waveform {
 }
 
 #[derive(Deserialize, Debug)]
-struct ScalarResult {
+struct Vital {
     value: f32,
     confidence: f32,
 }
@@ -90,7 +90,7 @@ fn test_session(resource: &str) {
 
     println!(" -> Duration: {:.2}s, Fs: {:.1}Hz", duration_sec, ref_data.fps);
 
-    let mut add_case = |id: &str, gt: Option<&ScalarResult>, signal: Option<&Waveform>, key: &str, tol: f32| {
+    let mut add_case = |id: &str, gt: Option<&Vital>, signal: Option<&Waveform>, key: &str, tol: f32| {
         if let (Some(g), Some(s)) = (gt, signal) {
             let meta = registry::get_vital_meta(id).unwrap();
             let min_win = meta.derivations[0].min_window_seconds;

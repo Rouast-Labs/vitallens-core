@@ -23,8 +23,8 @@ struct ReferenceData {
 struct Vitals {
     ppg_waveform: Option<Waveform>,
     respiratory_waveform: Option<Waveform>,     
-    heart_rate: Option<ScalarResult>,
-    respiratory_rate: Option<ScalarResult>,
+    heart_rate: Option<Vital>,
+    respiratory_rate: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -34,9 +34,9 @@ struct Waveform {
 }
 
 #[derive(Deserialize, Debug)]
-struct ScalarResult {
+struct Vital {
     value: f32,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: Why dont we use this anymore?
     confidence: f32,
 }
 
@@ -44,7 +44,7 @@ struct ScalarResult {
 
 #[allow(clippy::too_many_arguments)]
 fn verify_peaks(
-    filename: &str, // NEW: Added filename parameter
+    filename: &str,
     name: &str,
     fs: f32,
     signal: &[f32], 

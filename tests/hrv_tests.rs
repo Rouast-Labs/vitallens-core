@@ -24,13 +24,13 @@ struct ReferenceData {
 #[derive(Deserialize, Debug)]
 struct Vitals {
     ppg_waveform: Option<Waveform>,
-    heart_rate: Option<ScalarResult>,
-    hrv_sdnn: Option<ScalarResult>,
-    hrv_rmssd: Option<ScalarResult>,
-    hrv_lfhf: Option<ScalarResult>,
-    hrv_pnn50: Option<ScalarResult>,
-    hrv_sd1sd2: Option<ScalarResult>,
-    stress_index: Option<ScalarResult>,
+    heart_rate: Option<Vital>,
+    hrv_sdnn: Option<Vital>,
+    hrv_rmssd: Option<Vital>,
+    hrv_lfhf: Option<Vital>,
+    hrv_pnn50: Option<Vital>,
+    hrv_sd1sd2: Option<Vital>,
+    stress_index: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -42,7 +42,7 @@ struct Waveform {
 }
 
 #[derive(Deserialize, Debug)]
-struct ScalarResult {
+struct Vital {
     value: f32,
 }
 

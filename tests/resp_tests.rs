@@ -23,7 +23,7 @@ struct ReferenceData {
 #[derive(Deserialize, Debug)]
 struct Vitals {
     respiratory_waveform: Option<Waveform>,
-    ie_ratio: Option<ScalarResult>,
+    ie_ratio: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -33,7 +33,7 @@ struct Waveform {
 }
 
 #[derive(Deserialize, Debug)]
-struct ScalarResult {
+struct Vital {
     value: f32,
     confidence: f32,
 }

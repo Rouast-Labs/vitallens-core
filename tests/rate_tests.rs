@@ -20,8 +20,8 @@ struct ReferenceData {
 struct Vitals {
     ppg_waveform: Option<Waveform>,
     respiratory_waveform: Option<Waveform>,
-    heart_rate: Option<ScalarResult>,
-    respiratory_rate: Option<ScalarResult>,
+    heart_rate: Option<Vital>,
+    respiratory_rate: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -32,7 +32,7 @@ struct Waveform {
 }
 
 #[derive(Deserialize, Debug)]
-struct ScalarResult {
+struct Vital {
     value: f32,
 }
 
