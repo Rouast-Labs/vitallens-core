@@ -1,4 +1,4 @@
-use crate::types::{Rect, RoiMethod};
+use crate::types::{Rect, RoiMethod, FaceDetector};
 
 /// Standard Face Crop (Reduces width to 60%, height to 80%)
 const FACE_OFFSETS: [f32; 4] = [-0.2, -0.1, -0.2, -0.1];
@@ -12,14 +12,20 @@ const UPPER_BODY_OFFSETS: [f32; 4] = [0.25, 0.20, 0.25, 0.40];
 /// Upper Body Cropped (Version 1 - Cropped)
 const UPPER_BODY_CROPPED_OFFSETS: [f32; 4] = [0.19, 0.1455, 0.19, 0.2769];
 
+/// Offsets to convert other Face Detectors to default
+const VISION_TO_DEFAULT_OFFSETS: [f32; 4] = [0.0, 0.20, 0.0, 0.15]; 
+
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn calculate_roi(
     face: Rect,
     method: RoiMethod,
+    detector: FaceDetector,
     container_width: Option<f32>,
     container_height: Option<f32>,
     force_even: bool
 ) -> Rect {
+    let base_face = normalize_face_rect(face, detector);
+
     let offsets = match method {
         RoiMethod::Face => FACE_OFFSETS,
         RoiMethod::Forehead => FOREHEAD_OFFSETS,
@@ -28,13 +34,12 @@ pub fn calculate_roi(
         RoiMethod::Custom { left, top, right, bottom } => [left, top, right, bottom],
     };
 
-    // Reconstruct the tuple for the internal logic
     let container = match (container_width, container_height) {
         (Some(w), Some(h)) => Some((w, h)),
         _ => None
     };
 
-    apply_offsets(face, offsets, container, force_even)
+    apply_offsets(base_face, offsets, container, force_even)
 }
 
 fn apply_offsets(
@@ -85,6 +90,15 @@ fn apply_offsets(
     Rect { x: new_x, y: new_y, width: new_w, height: new_h }
 }
 
+fn normalize_face_rect(rect: Rect, detector: FaceDetector) -> Rect {
+    match detector {
+        FaceDetector::Default => rect,
+        FaceDetector::AppleVision => {
+            apply_offsets(rect, VISION_TO_DEFAULT_OFFSETS, None, false)
+        }
+    }
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn compute_iou(a: Rect, b: Rect) -> f32 {
     let x_overlap = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
@@ -131,8 +145,8 @@ pub fn is_contained(inner: Rect, outer: Rect, min_overlap_pct: f32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::FaceDetector;
 
-    // --- Helper for float comparison ---
     fn assert_rect_approx_eq(actual: Rect, expected: Rect, epsilon: f32) {
         assert!((actual.x - expected.x).abs() < epsilon, "X mismatch: got {}, expected {}", actual.x, expected.x);
         assert!((actual.y - expected.y).abs() < epsilon, "Y mismatch: got {}, expected {}", actual.y, expected.y);
@@ -140,12 +154,10 @@ mod tests {
         assert!((actual.height - expected.height).abs() < epsilon, "H mismatch: got {}, expected {}", actual.height, expected.height);
     }
 
-    // --- 1. Standard ROI Methods (Parity with JS/Python) ---
-
     #[test]
     fn test_roi_face() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::Face, None, None, false);
+        let result = calculate_roi(face, RoiMethod::Face, FaceDetector::Default, None, None, false);
         
         assert_rect_approx_eq(result, Rect::new(116.0, 112.0, 48.0, 96.0), 0.1);
     }
@@ -153,7 +165,7 @@ mod tests {
     #[test]
     fn test_roi_face_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::Face, None, None, false);
+        let result = calculate_roi(face, RoiMethod::Face, FaceDetector::Default, None, None, false);
         
         assert_rect_approx_eq(result, Rect::new(0.116, 0.112, 0.048, 0.096), 0.0001);
     }
@@ -161,7 +173,7 @@ mod tests {
     #[test]
     fn test_roi_forehead() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::Forehead, None, None, false);
+        let result = calculate_roi(face, RoiMethod::Forehead, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(128.0, 118.0, 24.0, 12.0), 0.1);
     }
@@ -169,7 +181,7 @@ mod tests {
     #[test]
     fn test_roi_forehead_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::Forehead, None, None, false);
+        let result = calculate_roi(face, RoiMethod::Forehead, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.128, 0.118, 0.024, 0.012), 0.0001);
     }
@@ -177,7 +189,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::UpperBody, None, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBody, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(80.0, 76.0, 120.0, 192.0), 0.1);
     }
@@ -185,7 +197,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body_normalized() {        
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::UpperBody, None, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBody, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.080, 0.076, 0.120, 0.192), 0.0001);
     }
@@ -193,7 +205,7 @@ mod tests {
     #[test]
     fn test_roi_upper_body_cropped() {
         let face = Rect::new(100.0, 100.0, 80.0, 120.0);
-        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(84.8, 82.54, 110.4, 170.688), 0.01);
     }
@@ -201,12 +213,10 @@ mod tests {
     #[test]
     fn test_roi_upper_body_cropped_normalized() {
         let face = Rect::new(0.1, 0.1, 0.08, 0.12);
-        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, None, None, false);
+        let result = calculate_roi(face, RoiMethod::UpperBodyCropped, FaceDetector::Default, None, None, false);
 
         assert_rect_approx_eq(result, Rect::new(0.0848, 0.08254, 0.1104, 0.170688), 0.0001);
     }
-
-    // --- 2. Boundary & Constraint Testing ---
 
     #[test]
     fn test_clipping_to_container() {
@@ -214,12 +224,12 @@ mod tests {
         let container = (40.0, 40.0); 
 
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
-        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
+        let result = calculate_roi(face, identity, FaceDetector::Default, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 10.0);
         assert_eq!(result.y, 10.0);
-        assert_eq!(result.width, 30.0);  // 40 - 10
-        assert_eq!(result.height, 30.0); // 40 - 10
+        assert_eq!(result.width, 30.0);   
+        assert_eq!(result.height, 30.0);  
     }
 
     #[test]
@@ -228,12 +238,12 @@ mod tests {
         let container = (1.0, 1.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
+        let result = calculate_roi(face, identity, FaceDetector::Default, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 0.9);
         assert_eq!(result.y, 0.9);
-        assert!((result.width - 0.1).abs() < 0.0001);  // 1.0 - 0.9 = 0.1
-        assert!((result.height - 0.1).abs() < 0.0001); // 1.0 - 0.9 = 0.1
+        assert!((result.width - 0.1).abs() < 0.0001);   
+        assert!((result.height - 0.1).abs() < 0.0001);  
     }
 
     #[test]
@@ -242,7 +252,7 @@ mod tests {
         let container = (100.0, 100.0);
         let expand = RoiMethod::Custom { left: 0.5, top: 0.5, right: 0.5, bottom: 0.5 };
 
-        let result = calculate_roi(face, expand, Some(container.0), Some(container.1), false);
+        let result = calculate_roi(face, expand, FaceDetector::Default, Some(container.0), Some(container.1), false);
 
         assert_rect_approx_eq(result, Rect::new(0.0, 0.0, 100.0, 100.0), 0.001);
     }
@@ -253,7 +263,7 @@ mod tests {
         let container = (1.0, 1.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, Some(container.0), Some(container.1), false);
+        let result = calculate_roi(face, identity, FaceDetector::Default, Some(container.0), Some(container.1), false);
 
         assert_eq!(result.x, 0.0);
         assert_eq!(result.y, 0.0);
@@ -266,15 +276,13 @@ mod tests {
         let face = Rect::new(50.0, 50.0, 51.0, 53.0);
         let identity = RoiMethod::Custom { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
 
-        let result = calculate_roi(face, identity, None, None, true);
+        let result = calculate_roi(face, identity, FaceDetector::Default, None, None, true);
 
         assert_eq!(result.width, 50.0);
         assert_eq!(result.height, 52.0);
         assert_eq!(result.x, 50.0);
         assert_eq!(result.y, 50.0);
     }
-
-    // --- 3. Utilities (IoU & Containment) ---
 
     #[test]
     fn test_iou_calculation() {
@@ -284,11 +292,9 @@ mod tests {
         let iou = compute_iou(a, b);
         assert!((iou - 0.3333).abs() < 0.001);
 
-        // No overlap
         let c = Rect::new(20.0, 20.0, 10.0, 10.0);
         assert_eq!(compute_iou(a, c), 0.0);
 
-        // Perfect overlap
         assert_eq!(compute_iou(a, a), 1.0);
     }
 
@@ -296,13 +302,10 @@ mod tests {
     fn test_containment() {
         let outer = Rect::new(0.0, 0.0, 100.0, 100.0);
         let inner = Rect::new(10.0, 10.0, 50.0, 50.0);
-        let crossing = Rect::new(90.0, 10.0, 50.0, 50.0); // Only 10px overlap horizontally
+        let crossing = Rect::new(90.0, 10.0, 50.0, 50.0);  
 
-        // Fully contained (100% overlap)
         assert!(is_contained(inner, outer, 0.99));
-
-        // Partially contained (Crossing)
-        assert!(!is_contained(crossing, outer, 0.5)); // Fails 50% check
-        assert!(is_contained(crossing, outer, 0.1));  // Passes 10% check
+        assert!(!is_contained(crossing, outer, 0.5));  
+        assert!(is_contained(crossing, outer, 0.1));   
     }
 }

@@ -153,6 +153,28 @@ impl<'source> FromPyObject<'source> for RoiMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
+pub enum FaceDetector {
+    Default,
+    AppleVision,
+}
+
+#[cfg(feature = "python")]
+impl<'source> FromPyObject<'source> for FaceDetector {
+    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+        if let Ok(s) = ob.extract::<String>() {
+            match s.to_lowercase().as_str() {
+                "default" => Ok(FaceDetector::Default),
+                "apple_vision" | "applevision" | "vision" => Ok(FaceDetector::AppleVision),
+                _ => Err(pyo3::exceptions::PyValueError::new_err("Invalid FaceDetector string")),
+            }
+        } else {
+            Err(pyo3::exceptions::PyValueError::new_err("FaceDetector must be a string"))
+        }
+    }
+}
+
 // --- BUFFER MANAGEMENT TYPES ---
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

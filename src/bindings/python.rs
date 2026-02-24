@@ -7,7 +7,7 @@ use crate::signal::rate::{RateBounds, RateStrategy};
 use crate::registry::HrvMetric;
 use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 use crate::geometry::roi;
-use crate::types::{Rect, RoiMethod};
+use crate::types::{Rect, RoiMethod, FaceDetector};
 use crate::types::VitalDisplayMeta;
 
 pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -117,16 +117,17 @@ fn find_peaks(
 }
 
 #[pyfunction]
-#[pyo3(signature = (face, method, container=None, force_even=false))]
+#[pyo3(signature = (face, method, detector=FaceDetector::Default, container=None, force_even=false))]
 fn calculate_roi(
     _py: Python,
     face: Rect,
     method: RoiMethod,
+    detector: FaceDetector,
     container: Option<(f32, f32)>,
     force_even: bool
 ) -> PyResult<Rect> {
     let (cw, ch) = container.map(|(w, h)| (Some(w), Some(h))).unwrap_or((None, None));    
-    Ok(roi::calculate_roi(face, method, cw, ch, force_even))
+    Ok(roi::calculate_roi(face, method, detector, cw, ch, force_even))
 }
 
 #[pyfunction]
