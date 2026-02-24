@@ -470,6 +470,21 @@ impl SessionCore {
             message: "The provided values are estimates and should be interpreted according to the provided confidence scores. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.".to_string(),
         }
     }
+
+    fn reset(&mut self) {
+        self.timestamps.clear();
+        self.face_coords.clear();
+        self.face_conf.clear();
+        self.face_note = None;
+        self.last_emitted_timestamp = -1.0;
+        
+        for buf in self.signal_data.values_mut() {
+            buf.clear();
+        }
+        for buf in self.signal_confs.values_mut() {
+            buf.clear();
+        }
+    }
 }
 
 // --- FFI WRAPPERS ---
@@ -495,6 +510,11 @@ impl Session {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
         guard.process(input, mode)
     }
+
+    pub fn reset(&self) {
+        let mut guard = self.core.lock().expect("Failed to lock Session core");
+        guard.reset();
+    }
 }
 
 #[cfg(feature = "python")]
@@ -511,6 +531,11 @@ impl Session {
     pub fn py_process(&self, input: SessionInput, mode: WaveformMode) -> SessionResult {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
         guard.process(input, mode)
+    }
+
+    #[pyo3(name = "reset")]
+    pub fn py_reset(&self) {
+        self.reset();
     }
 }
 
@@ -533,5 +558,140 @@ impl Session {
         let result = self.process(input, mode);  
         
         Ok(serde_wasm_bindgen::to_value(&result)?)
+    }
+
+    #[wasm_bindgen(js_name = reset)]
+    pub fn reset_js(&self) {
+        self.reset();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn mock_config(fps: f32) -> SessionConfig {
+        SessionConfig {
+            model_name: "test-model".to_string(),
+            supported_vitals: vec!["heart_rate".to_string()],
+            return_waveforms: Some(vec!["abp_waveform".to_string()]),
+            fps_target: fps,
+            input_size: 30,
+            n_inputs: 4,
+            roi_method: "face".to_string(),
+        }
+    }
+
+    fn mock_input(timestamps: Vec<f64>, signal_data: Vec<f32>) -> SessionInput {
+        let mut signals = HashMap::new();
+        signals.insert(
+            "abp_waveform".to_string(),
+            SignalInput {
+                data: signal_data.clone(),
+                confidence: vec![1.0; signal_data.len()],
+            },
+        );
+
+        SessionInput {
+            timestamp: timestamps,
+            signals,
+            face: None,
+        }
+    }
+
+    #[test]
+    fn test_session_validation_mismatch() {
+        let session = Session::new(mock_config(30.0));
+        
+        // 3 timestamps, but only 2 signal data points
+        let input = mock_input(vec![0.0, 1.0, 2.0], vec![1.0, 2.0]);
+        let result = session.process(input, WaveformMode::Global);
+
+        assert!(result.timestamp.is_empty(), "Result should be empty on failure");
+        assert!(result.message.contains("Length mismatch"), "Should return length mismatch error");
+    }
+
+    #[test]
+    fn test_session_incremental_mode() {
+        let session = Session::new(mock_config(1.0));
+
+        // First pass: send 3 frames
+        let input1 = mock_input(vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]);
+        let res1 = session.process(input1, WaveformMode::Incremental);
+        
+        assert_eq!(res1.timestamp.len(), 3, "Initial incremental should return all 3 frames");
+
+        // Second pass: send 3 frames, but 2 overlap with the previous input
+        let input2 = mock_input(vec![1.0, 2.0, 3.0], vec![11.0, 12.0, 13.0]);
+        let res2 = session.process(input2, WaveformMode::Incremental);
+
+        assert_eq!(res2.timestamp.len(), 1, "Incremental should only return the 1 strictly new frame");
+        assert_eq!(res2.timestamp[0], 3.0);
+        assert_eq!(res2.waveforms["abp_waveform"].data[0], 13.0);
+    }
+
+    #[test]
+    fn test_session_windowed_mode() {
+        let session = Session::new(mock_config(1.0)); // 1 FPS
+
+        // Send 5 seconds of data
+        let input = mock_input(
+            vec![0.0, 1.0, 2.0, 3.0, 4.0], 
+            vec![10.0, 20.0, 30.0, 40.0, 50.0]
+        );
+        
+        // Request a 3-second window
+        let result = session.process(input, WaveformMode::Windowed { seconds: 3.0 });
+
+        assert_eq!(result.timestamp.len(), 3, "Windowed mode should restrict output to exactly 3 frames");
+        assert_eq!(result.timestamp, vec![2.0, 3.0, 4.0], "Should return the most recent timestamps");
+        assert_eq!(result.waveforms["abp_waveform"].data, vec![30.0, 40.0, 50.0]);
+    }
+
+    #[test]
+    fn test_session_history_pruning() {
+        // Max history is fps * 60 seconds. At 1 FPS, max history is 60 frames.
+        let session = Session::new(mock_config(1.0));
+
+        // Create 100 frames of data
+        let timestamps: Vec<f64> = (0..100).map(|x| x as f64).collect();
+        let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
+        
+        let input = mock_input(timestamps, data);
+        
+        // Use Incremental instead of Global so prune_state() is triggered
+        let result = session.process(input, WaveformMode::Incremental);
+
+        assert_eq!(
+            result.timestamp.len(), 
+            60, 
+            "Session should aggressively prune data exceeding the 60-second max history"
+        );
+        assert_eq!(
+            result.timestamp.last().unwrap(), 
+            &99.0, 
+            "The kept history should be the most recent data"
+        );
+    }
+
+    #[test]
+    fn test_session_reset() {
+        let session = Session::new(mock_config(30.0));
+
+        // 1. Send initial batch
+        let input1 = mock_input(vec![0.0, 0.1, 0.2], vec![1.0, 2.0, 3.0]);
+        let res1 = session.process(input1, WaveformMode::Global);
+        assert_eq!(res1.timestamp.len(), 3);
+
+        // 2. Clear state
+        session.reset();
+
+        // 3. Send new batch with completely different timeline
+        let input2 = mock_input(vec![5.0, 5.1], vec![4.0, 5.0]);
+        let res2 = session.process(input2, WaveformMode::Global);
+
+        assert_eq!(res2.timestamp.len(), 2, "Session should treat input2 as a brand new session after reset");
+        assert_eq!(res2.waveforms["abp_waveform"].data, vec![4.0, 5.0], "Should not contain old signal data");
     }
 }

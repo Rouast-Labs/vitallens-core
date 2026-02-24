@@ -79,6 +79,11 @@ impl SignalBuffer {
             self.count.drain(0..remove_count);
         }
     }
+
+    pub fn clear(&mut self) {
+        self.sum.clear();
+        self.count.clear();
+    }
 }
 
 #[cfg(test)]
@@ -180,5 +185,20 @@ mod tests {
         buf.prune(10);
         
         assert_eq!(buf.compute_average().len(), 2);
+    }
+
+    #[test]
+    fn test_clear_removes_all_data() {
+        let mut buf = SignalBuffer::new();
+        buf.merge(&[10.0, 20.0, 30.0], 0, None);
+        
+        assert_eq!(buf.compute_average().len(), 3, "Buffer should contain 3 items");
+        
+        // Trigger clear
+        buf.clear();
+        
+        assert!(buf.sum.is_empty(), "Sum queue should be empty");
+        assert!(buf.count.is_empty(), "Count queue should be empty");
+        assert_eq!(buf.compute_average().len(), 0, "Average computation should return empty vector");
     }
 }
