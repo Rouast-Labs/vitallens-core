@@ -263,6 +263,18 @@ pub struct SessionResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "python", pyclass(get_all, set_all))]
+#[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
+pub struct VitalDisplayMeta {
+    pub id: String,
+    pub display_name: String,
+    pub short_name: String,
+    pub unit: String,
+    pub color: String,
+    pub emoji: String,
+}
+
 // --- PYTHON CONSTRUCTORS ---
 
 #[cfg(feature = "python")]
@@ -334,5 +346,13 @@ impl Rect {
 
     fn __repr__(&self) -> String {
         format!("Rect(x={:.2}, y={:.2}, w={:.2}, h={:.2})", self.x, self.y, self.width, self.height)
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl VitalDisplayMeta {
+    fn __repr__(&self) -> String {
+        format!("VitalDisplayMeta(id='{}', name='{}')", self.id, self.display_name)
     }
 }

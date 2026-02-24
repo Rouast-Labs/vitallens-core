@@ -8,12 +8,14 @@ use crate::registry::HrvMetric;
 use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 use crate::geometry::roi;
 use crate::types::{Rect, RoiMethod};
+use crate::types::VitalDisplayMeta;
 
 pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
+    m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
     Ok(())
 }
 
@@ -125,4 +127,9 @@ fn calculate_roi(
 ) -> PyResult<Rect> {
     let (cw, ch) = container.map(|(w, h)| (Some(w), Some(h))).unwrap_or((None, None));    
     Ok(roi::calculate_roi(face, method, cw, ch, force_even))
+}
+
+#[pyfunction]
+fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalDisplayMeta>> {
+    Ok(crate::get_vital_info(vital_id.to_string()))
 }

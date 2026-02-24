@@ -66,6 +66,9 @@ pub struct VitalMeta {
     pub processing: Option<ProcessingConfig>,
     pub unit: String,
     pub display_name: String,
+    pub short_name: String,
+    pub color: String,
+    pub emoji: String,
 }
 
 // --- THE REGISTRY ---
@@ -86,6 +89,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             }),
             unit: "unitless".to_string(),
             display_name: "PPG Waveform".to_string(),
+            short_name: "PPG".to_string(),
+            color: "#E62100".to_string(),
+            emoji: "❤️".to_string(),
         }),
 
         // Respiratory Waveform
@@ -100,7 +106,10 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
                 max_freq: Some(1.0),
             }),
             unit: "unitless".to_string(),
-            display_name: "RESP Waveform".to_string(),
+            display_name: "Resp Waveform".to_string(),
+            short_name: "RESP".to_string(),
+            color: "#00A3FC".to_string(),
+            emoji: "🫁".to_string(),
         }),
 
         // Heart Rate
@@ -121,6 +130,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "bpm".to_string(),
             display_name: "Heart Rate".to_string(),
+            short_name: "HR".to_string(),
+            color: "#E62100".to_string(),
+            emoji: "❤️".to_string(),
         }),
 
         // Respiratory Rate
@@ -141,6 +153,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "bpm".to_string(),
             display_name: "Respiratory Rate".to_string(),
+            short_name: "RR".to_string(),
+            color: "#00A3FC".to_string(),
+            emoji: "🫁".to_string(),
         }),
 
         // HRV (SDNN)
@@ -159,6 +174,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "ms".to_string(),
             display_name: "Heart Rate Variability (SDNN)".to_string(),
+            short_name: "SDNN".to_string(),
+            color: "#D81BA7".to_string(),
+            emoji: "💓".to_string(),
         }),
 
         // HRV (RMSSD)
@@ -177,6 +195,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "ms".to_string(),
             display_name: "Heart Rate Variability (RMSSD)".to_string(),
+            short_name: "RMSSD".to_string(),
+            color: "#D81BA7".to_string(),
+            emoji: "💓".to_string(),
         }),
 
         // HRV (pNN50)
@@ -195,6 +216,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "%".to_string(),
             display_name: "Heart Rate Variability (pNN50)".to_string(),
+            short_name: "pNN50".to_string(),
+            color: "#D81BA7".to_string(),
+            emoji: "💓".to_string(),
         }),
 
         // HRV (LF/HF)
@@ -213,6 +237,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "ratio".to_string(),
             display_name: "Heart Rate Variability (LF/HF)".to_string(),
+            short_name: "LF/HF".to_string(),
+            color: "#D81BA7".to_string(),
+            emoji: "💓".to_string(),
         }),
 
         // HRV (SD1/SD2)
@@ -231,6 +258,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "ratio".to_string(),
             display_name: "Heart Rate Variability (SD1/SD2)".to_string(),
+            short_name: "SD1/SD2".to_string(),
+            color: "#D81BA7".to_string(),
+            emoji: "💓".to_string(),
         }),
         
         // I:E Ratio
@@ -249,6 +279,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "ratio".to_string(),
             display_name: "I:E Ratio".to_string(),
+            short_name: "I:E".to_string(),
+            color: "#00A3FC".to_string(),
+            emoji: "🫁".to_string(),
         }),
 
         // Stress Index (SI)
@@ -267,6 +300,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "SI".to_string(),
             display_name: "Stress Index".to_string(),
+            short_name: "SI".to_string(),
+            color: "#FF8A00".to_string(),
+            emoji: "⚡️".to_string(),
         }),
 
         // SpO2
@@ -285,6 +321,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "%".to_string(),
             display_name: "SpO2".to_string(),
+            short_name: "SpO2".to_string(),
+            color: "#00C7BE".to_string(),
+            emoji: "🫧".to_string(),
         }),
 
         // Arterial Blood Pressure Waveform
@@ -300,6 +339,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             }),
             unit: "mmHg".to_string(),
             display_name: "ABP Waveform".to_string(),
+            short_name: "ABP".to_string(),
+            color: "#7B61FF".to_string(),
+            emoji: "🩸".to_string(),
         }),
 
         // Systolic Blood Pressure
@@ -329,6 +371,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "mmHg".to_string(),
             display_name: "Systolic Blood Pressure".to_string(),
+            short_name: "SBP".to_string(),
+            color: "#7B61FF".to_string(),
+            emoji: "🩸".to_string(),
         }),
 
         // Diastolic Blood Pressure
@@ -358,6 +403,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "mmHg".to_string(),
             display_name: "Diastolic Blood Pressure".to_string(),
+            short_name: "DBP".to_string(),
+            color: "#7B61FF".to_string(),
+            emoji: "🩸".to_string(),
         }),
 
         // Mean Arterial Pressure (MAP)
@@ -387,6 +435,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "mmHg".to_string(),
             display_name: "Mean Arterial Pressure".to_string(),
+            short_name: "MAP".to_string(),
+            color: "#7B61FF".to_string(),
+            emoji: "🩸".to_string(),
         }),
 
         // Pulse Pressure (PP)
@@ -416,6 +467,9 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             processing: None,
             unit: "mmHg".to_string(),
             display_name: "Pulse Pressure".to_string(),
+            short_name: "PP".to_string(),
+            color: "#7B61FF".to_string(),
+            emoji: "🩸".to_string(),
         }),
 
         _ => None

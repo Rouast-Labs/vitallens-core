@@ -32,4 +32,4 @@ bindings/swift/
 # Mac
 .DS_Store
 
-bindings/
+/bindings/
