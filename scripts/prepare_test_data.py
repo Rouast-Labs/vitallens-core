@@ -46,8 +46,8 @@ def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_thre
     Iterates PAIRS of peaks. Only accepts interval if BOTH peaks are confident.
     """
     intervals = []
+    used_confs = []
     
-    # peaks_indices must be sorted
     for i in range(len(peaks_indices) - 1):
         p1_idx_float = peaks_indices[i]
         p2_idx_float = peaks_indices[i+1]
@@ -55,14 +55,12 @@ def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_thre
         idx1 = int(round(p1_idx_float))
         idx2 = int(round(p2_idx_float))
         
-        # Check Bounds
         if idx1 >= len(confidence_array) or idx2 >= len(confidence_array):
             continue
             
         c1 = confidence_array[idx1]
         c2 = confidence_array[idx2]
         
-        # Confidence Gating (Strict Intersection)
         if c1 >= conf_threshold and c2 >= conf_threshold:
             t1 = p1_idx_float / fs
             t2 = p2_idx_float / fs
@@ -70,8 +68,10 @@ def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_thre
             
             if diff_ms > 0:
                 intervals.append(diff_ms)
+                used_confs.extend([float(c1), float(c2)])
                 
-    return intervals
+    min_conf_peaks = min(used_confs) if used_confs else 0.0
+    return intervals, min_conf_peaks
 
 def filter_outliers_rust_parity(intervals_ms):
     """
@@ -107,12 +107,12 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
     if len(peaks_indices_float) < 2: return {}
 
     # 1. Interval Extraction (Parity)
-    raw_intervals_ms = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)
+    raw_intervals_ms, min_conf_peaks = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)
     
     # 2. Filter (Median-Seeded Parity)
     clean_rri_ms = filter_outliers_rust_parity(raw_intervals_ms)
     
-    if len(clean_rri_ms) < 2: return {}
+    if len(clean_rri_ms) < 2: return {}, 0.0
 
     # 3. Reconstruct Timeline for NeuroKit
     clean_peaks_ms = np.cumsum([0] + clean_rri_ms)
@@ -148,7 +148,10 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
         if 'HRV_SD1SD2' in nl: metrics['hrv_sd1sd2'] = nl['HRV_SD1SD2'].values[0]
     except: pass
         
-    return metrics
+    avg_conf = float(np.mean(confidence_array)) if len(confidence_array) > 0 else 0.0
+    final_conf = min(avg_conf, min_conf_peaks)
+    
+    return metrics, final_conf
 
 class PeakAnnotator:
     def __init__(self, raw_signal, fs, title, rate_hint=None, 
@@ -266,7 +269,7 @@ def main():
         # Use full confidence array for gating inside metric calc
         confidence_data = np.array(conf_arr, dtype=np.float32) if conf_arr else np.ones(len(wave["data"]))
         
-        nk_metrics = calculate_neurokit_metrics(
+        nk_metrics, nk_conf = calculate_neurokit_metrics(
             peaks_float, fs, confidence_data, CONF_THRESH, "PPG"
         )
         
@@ -281,9 +284,9 @@ def main():
             elif key in nk_metrics:
                 if key not in vitals: vitals[key] = {}
                 vitals[key]["value"] = round(nk_metrics[key], 2)
-                vitals[key]["confidence"] = 1.0
+                vitals[key]["confidence"] = round(float(nk_conf), 4)
                 vitals[key]["note"] = "Ground Truth (NeuroKit2 Verified)"
-                print(f"    [WRITE] {key}: {vitals[key]['value']}")
+                print(f"    [WRITE] {key}: {vitals[key]['value']} (conf: {vitals[key]['confidence']})")
 
     # 4. Process Resp
     if "respiratory_waveform" in vitals:

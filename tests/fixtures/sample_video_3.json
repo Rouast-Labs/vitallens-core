@@ -12652,7 +12652,7 @@
         "hrv_sdnn": {
             "value": 82.2,
             "unit": "ms",
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "heart_rate": {
@@ -19993,28 +19993,28 @@
         "hrv_rmssd": {
             "value": 78.97,
             "unit": "ms",
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "hrv_lfhf": {
             "value": 2.5,
             "unit": "unitless",
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (Manual)"
         },
         "stress_index": {
             "value": 50.0,
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (Manual)"
         },
         "hrv_pnn50": {
             "value": 56.67,
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "hrv_sd1sd2": {
             "value": 0.55,
-            "confidence": 0.99,
+            "confidence": 0.90,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {

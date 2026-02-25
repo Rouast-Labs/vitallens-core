@@ -13,7 +13,7 @@ const UPPER_BODY_OFFSETS: [f32; 4] = [0.25, 0.20, 0.25, 0.40];
 const UPPER_BODY_CROPPED_OFFSETS: [f32; 4] = [0.19, 0.1455, 0.19, 0.2769];
 
 /// Offsets to convert other Face Detectors to default
-const VISION_TO_DEFAULT_OFFSETS: [f32; 4] = [0.0, 0.20, 0.0, 0.15]; 
+const VISION_TO_DEFAULT_OFFSETS: [f32; 4] = [-0.05, 0.20, -0.05, 0.25];
 
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn calculate_roi(
@@ -139,8 +139,6 @@ pub fn is_contained(inner: Rect, outer: Rect, min_overlap_pct: f32) -> bool {
 
     visible_w >= required_w && visible_h >= required_h
 }
-
-// FILE: src/geometry/roi.rs (Test Section)
 
 #[cfg(test)]
 mod tests {

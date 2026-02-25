@@ -48,7 +48,7 @@ pub fn estimate_hrv(
         ..Default::default()
     };
     
-    let (intervals, min_conf) = extract_nn_intervals(&sequences, timestamps, confidence, hrv_opts);
+    let (intervals, min_conf_peaks) = extract_nn_intervals(&sequences, timestamps, confidence, hrv_opts);
 
     if intervals.is_empty() {
         return (0.0, 0.0);
@@ -63,7 +63,15 @@ pub fn estimate_hrv(
         crate::registry::HrvMetric::Sd1Sd2 => calculate_sd1sd2(&intervals),
     };
 
-    (value, min_conf)
+    let avg_conf = if confidence.is_empty() {
+        0.0
+    } else {
+        confidence.iter().sum::<f32>() / confidence.len() as f32
+    };
+
+    let final_conf = avg_conf.min(min_conf_peaks);
+
+    (value, final_conf)
 }
 
 /// Extracts valid Normal-to-Normal (NN) intervals from multiple sequences of peaks.
@@ -765,5 +773,36 @@ mod tests {
         
         assert!(ratio > 0.0);
         assert!(ratio < 1.0, "Expected SD1 < SD2 for smooth rhythm, got ratio {}", ratio);
+    }
+
+    #[test]
+    fn test_estimate_hrv_confidence_logic() {
+        let fs = 30.0;
+        let duration = 5.0;
+        let total_samples = (fs * duration) as usize;
+        
+        // 60 BPM sine wave to guarantee peak detection
+        let signal: Vec<f32> = (0..total_samples)
+            .map(|i| (i as f32 / fs * 2.0 * std::f32::consts::PI * 1.0).sin())
+            .collect();
+            
+        let mut confidence = vec![0.2; total_samples];
+        // Simulate high confidence only at the peaks, low elsewhere
+        for i in 0..total_samples {
+            if signal[i] > 0.9 {
+                confidence[i] = 1.0;
+            }
+        }
+
+        let timestamps: Vec<f64> = (0..total_samples).map(|i| i as f64 / fs as f64).collect();
+        let bounds = SignalBounds { min_rate: 40.0, max_rate: 220.0 };
+
+        let (_, final_conf) = estimate_hrv(&signal, fs, crate::registry::HrvMetric::Sdnn, &timestamps, &confidence, bounds, None);
+
+        let avg_conf = confidence.iter().sum::<f32>() / total_samples as f32;
+        
+        // Since min_conf_peaks is ~1.0, the final confidence should be clamped down to the average
+        assert!(final_conf < 1.0);
+        assert!((final_conf - avg_conf).abs() < 1e-4);
     }
 }

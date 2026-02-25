@@ -4420,7 +4420,7 @@
         "hrv_rmssd": {
             "value": 53.61,
             "unit": "ms",
-            "confidence": 1.0,
+            "confidence": 0.92,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "heart_rate": {
@@ -7003,12 +7003,12 @@
         "hrv_sdnn": {
             "value": 56.64,
             "unit": "ms",
-            "confidence": 1.0,
+            "confidence": 0.92,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "hrv_pnn50": {
             "value": 35.0,
-            "confidence": 1.0,
+            "confidence": 0.92,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {
