@@ -19,10 +19,6 @@ venv/
 # Web / Wasm
 pkg/
 
-# UniFFI / Mobile Generated Bindings
-# (Optional: Comment this out if you want to version control the generated Swift files)
-bindings/swift/
-
 # IDEs
 .idea/
 .vscode/
@@ -32,4 +28,9 @@ bindings/swift/
 # Mac
 .DS_Store
 
-/bindings/
+# Ignore everything in bindings
+/bindings/*
+
+# Allow the specific file path directly
+!/bindings/swift/
+!/bindings/swift/VitalLensCore.swift
