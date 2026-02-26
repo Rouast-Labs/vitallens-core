@@ -528,25 +528,51 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 
+/**
+ * Manages the tracking, matching, and lifecycle of video frame buffers across a session.
+ */
 public protocol BufferPlannerProtocol : AnyObject {
     
     /**
-     * Evaluates a target ROI against the list of known buffers.
+     * Evaluates a target ROI against the list of known active buffers using
+     * Intersection over Union (IoU) to maintain spatial consistency.
+     *
+     * # Arguments
+     * * `target_roi` - The bounding box of the newly detected subject.
+     * * `timestamp` - The current frame's timestamp.
+     * * `active_buffers` - Metadata of currently tracked buffers.
+     *
+     * # Returns
+     * A `BufferAction` instructing the caller to either append to an existing buffer or create a new one.
      */
     func evaluateTarget(targetRoi: Rect, timestamp: Double, activeBuffers: [BufferMetadata])  -> BufferAction
     
     /**
-     * Determines if a buffer is actionable based on configuration constraints.
+     * Determines if a specific buffer is actionable based on volume and configuration constraints.
      */
     func isReady(count: UInt32, mode: InferenceMode, hasState: Bool, flush: Bool)  -> Bool
     
     /**
-     * Determines which buffer gets consumed, and which buffers should be dropped.
+     * Determines which buffer (if any) is ready for inference execution, and identifies
+     * stale buffers that should be dropped from memory.
+     *
+     * # Arguments
+     * * `active_buffers` - Metadata of currently tracked buffers.
+     * * `current_time` - The current execution timestamp.
+     * * `mode` - The operational mode (Stream or File).
+     * * `has_state` - Whether the engine has warmed up with prior state.
+     * * `flush` - If true, forces the consumption of the buffer regardless of capacity limits.
+     *
+     * # Returns
+     * An `ExecutionPlan` containing an optional command to execute inference, and a list of buffer IDs to drop.
      */
     func poll(activeBuffers: [BufferMetadata], currentTime: Double, mode: InferenceMode, hasState: Bool, flush: Bool)  -> ExecutionPlan
     
 }
 
+/**
+ * Manages the tracking, matching, and lifecycle of video frame buffers across a session.
+ */
 open class BufferPlanner:
     BufferPlannerProtocol {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -606,7 +632,16 @@ public convenience init(config: BufferConfig) {
 
     
     /**
-     * Evaluates a target ROI against the list of known buffers.
+     * Evaluates a target ROI against the list of known active buffers using
+     * Intersection over Union (IoU) to maintain spatial consistency.
+     *
+     * # Arguments
+     * * `target_roi` - The bounding box of the newly detected subject.
+     * * `timestamp` - The current frame's timestamp.
+     * * `active_buffers` - Metadata of currently tracked buffers.
+     *
+     * # Returns
+     * A `BufferAction` instructing the caller to either append to an existing buffer or create a new one.
      */
 open func evaluateTarget(targetRoi: Rect, timestamp: Double, activeBuffers: [BufferMetadata]) -> BufferAction {
     return try!  FfiConverterTypeBufferAction.lift(try! rustCall() {
@@ -619,7 +654,7 @@ open func evaluateTarget(targetRoi: Rect, timestamp: Double, activeBuffers: [Buf
 }
     
     /**
-     * Determines if a buffer is actionable based on configuration constraints.
+     * Determines if a specific buffer is actionable based on volume and configuration constraints.
      */
 open func isReady(count: UInt32, mode: InferenceMode, hasState: Bool, flush: Bool) -> Bool {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -633,7 +668,18 @@ open func isReady(count: UInt32, mode: InferenceMode, hasState: Bool, flush: Boo
 }
     
     /**
-     * Determines which buffer gets consumed, and which buffers should be dropped.
+     * Determines which buffer (if any) is ready for inference execution, and identifies
+     * stale buffers that should be dropped from memory.
+     *
+     * # Arguments
+     * * `active_buffers` - Metadata of currently tracked buffers.
+     * * `current_time` - The current execution timestamp.
+     * * `mode` - The operational mode (Stream or File).
+     * * `has_state` - Whether the engine has warmed up with prior state.
+     * * `flush` - If true, forces the consumption of the buffer regardless of capacity limits.
+     *
+     * # Returns
+     * An `ExecutionPlan` containing an optional command to execute inference, and a list of buffer IDs to drop.
      */
 open func poll(activeBuffers: [BufferMetadata], currentTime: Double, mode: InferenceMode, hasState: Bool, flush: Bool) -> ExecutionPlan {
     return try!  FfiConverterTypeExecutionPlan.lift(try! rustCall() {
@@ -704,14 +750,34 @@ public func FfiConverterTypeBufferPlanner_lower(_ value: BufferPlanner) -> Unsaf
 
 
 
+/**
+ * A thread-safe, stateful session object for processing continuous frame data natively across FFI and Wasm.
+ */
 public protocol SessionProtocol : AnyObject {
     
+    /**
+     * Processes a new batch of inputs, updating the session's internal state
+     * and returning the calculated vital signs and waveforms.
+     *
+     * # Arguments
+     * * `input` - The latest batch of input data (signals, face coordinates, timestamps).
+     * * `mode` - The extraction mode dictating the payload size (Incremental, Windowed, or Global).
+     *
+     * # Returns
+     * A `SessionResult` containing the estimated vitals, waveforms, and metadata.
+     */
     func process(input: SessionInput, mode: WaveformMode)  -> SessionResult
     
+    /**
+     * Resets the internal state of the session, clearing all historical buffers.
+     */
     func reset() 
     
 }
 
+/**
+ * A thread-safe, stateful session object for processing continuous frame data natively across FFI and Wasm.
+ */
 open class Session:
     SessionProtocol {
     fileprivate let pointer: UnsafeMutableRawPointer!
@@ -749,6 +815,15 @@ open class Session:
     public func uniffiClonePointer() -> UnsafeMutableRawPointer {
         return try! rustCall { uniffi_vitallens_core_fn_clone_session(self.pointer, $0) }
     }
+    /**
+     * Creates a new stateful session using the provided configuration.
+     *
+     * # Arguments
+     * * `config` - The configuration parameters dictating target frame rate and model metadata.
+     *
+     * # Returns
+     * A new instance of `Session`.
+     */
 public convenience init(config: SessionConfig) {
     let pointer =
         try! rustCall() {
@@ -770,6 +845,17 @@ public convenience init(config: SessionConfig) {
     
 
     
+    /**
+     * Processes a new batch of inputs, updating the session's internal state
+     * and returning the calculated vital signs and waveforms.
+     *
+     * # Arguments
+     * * `input` - The latest batch of input data (signals, face coordinates, timestamps).
+     * * `mode` - The extraction mode dictating the payload size (Incremental, Windowed, or Global).
+     *
+     * # Returns
+     * A `SessionResult` containing the estimated vitals, waveforms, and metadata.
+     */
 open func process(input: SessionInput, mode: WaveformMode) -> SessionResult {
     return try!  FfiConverterTypeSessionResult.lift(try! rustCall() {
     uniffi_vitallens_core_fn_method_session_process(self.uniffiClonePointer(),
@@ -779,6 +865,9 @@ open func process(input: SessionInput, mode: WaveformMode) -> SessionResult {
 })
 }
     
+    /**
+     * Resets the internal state of the session, clearing all historical buffers.
+     */
 open func reset() {try! rustCall() {
     uniffi_vitallens_core_fn_method_session_reset(self.uniffiClonePointer(),$0
     )
@@ -840,6 +929,9 @@ public func FfiConverterTypeSession_lower(_ value: Session) -> UnsafeMutableRawP
 }
 
 
+/**
+ * The concrete instruction resulting from evaluating a target.
+ */
 public struct BufferAction {
     public var action: BufferActionType
     public var matchedId: String?
@@ -914,6 +1006,9 @@ public func FfiConverterTypeBufferAction_lower(_ value: BufferAction) -> RustBuf
 }
 
 
+/**
+ * Capacity constraints and threshold configuration for buffers.
+ */
 public struct BufferConfig {
     public var minNoState: UInt32
     public var minWithState: UInt32
@@ -1004,6 +1099,9 @@ public func FfiConverterTypeBufferConfig_lower(_ value: BufferConfig) -> RustBuf
 }
 
 
+/**
+ * Identifiable state metadata attached to a specific processing buffer.
+ */
 public struct BufferMetadata {
     public var id: String
     public var roi: Rect
@@ -1094,6 +1192,9 @@ public func FfiConverterTypeBufferMetadata_lower(_ value: BufferMetadata) -> Rus
 }
 
 
+/**
+ * Aggregated output from the BufferPlanner dictating next steps for all buffers.
+ */
 public struct ExecutionPlan {
     public var command: InferenceCommand?
     public var buffersToDrop: [String]
@@ -1160,6 +1261,9 @@ public func FfiConverterTypeExecutionPlan_lower(_ value: ExecutionPlan) -> RustB
 }
 
 
+/**
+ * Input payload representing tracked face bounding boxes over a sequence of frames.
+ */
 public struct FaceInput {
     public var coordinates: [[Float]]
     public var confidence: [Float]
@@ -1226,6 +1330,9 @@ public func FfiConverterTypeFaceInput_lower(_ value: FaceInput) -> RustBuffer {
 }
 
 
+/**
+ * Filtered/smoothed output face coordinates.
+ */
 public struct FaceResult {
     public var coordinates: [[Float]]
     public var confidence: [Float]
@@ -1300,6 +1407,9 @@ public func FfiConverterTypeFaceResult_lower(_ value: FaceResult) -> RustBuffer 
 }
 
 
+/**
+ * Command returned by the BufferPlanner indicating how many frames to extract.
+ */
 public struct InferenceCommand {
     public var bufferId: String
     public var takeCount: UInt32
@@ -1374,6 +1484,9 @@ public func FfiConverterTypeInferenceCommand_lower(_ value: InferenceCommand) ->
 }
 
 
+/**
+ * A simple bounding box definition.
+ */
 public struct Rect {
     public var x: Float
     public var y: Float
@@ -1456,6 +1569,9 @@ public func FfiConverterTypeRect_lower(_ value: Rect) -> RustBuffer {
 }
 
 
+/**
+ * Configuration for initializing a VitalLens session.
+ */
 public struct SessionConfig {
     public var modelName: String
     public var supportedVitals: [String]
@@ -1562,6 +1678,9 @@ public func FfiConverterTypeSessionConfig_lower(_ value: SessionConfig) -> RustB
 }
 
 
+/**
+ * The core batch input object submitted to the session engine for processing.
+ */
 public struct SessionInput {
     public var face: FaceInput?
     public var signals: [String: SignalInput]
@@ -1636,6 +1755,9 @@ public func FfiConverterTypeSessionInput_lower(_ value: SessionInput) -> RustBuf
 }
 
 
+/**
+ * The final payload aggregated from a session processing tick.
+ */
 public struct SessionResult {
     public var timestamp: [Double]
     public var face: FaceResult?
@@ -1734,6 +1856,9 @@ public func FfiConverterTypeSessionResult_lower(_ value: SessionResult) -> RustB
 }
 
 
+/**
+ * A generic wrapper for a single physical signal and its corresponding confidence array.
+ */
 public struct SignalInput {
     public var data: [Float]
     public var confidence: [Float]
@@ -1800,6 +1925,9 @@ public func FfiConverterTypeSignalInput_lower(_ value: SignalInput) -> RustBuffe
 }
 
 
+/**
+ * Extracted UI/display properties for a specific vital sign.
+ */
 public struct VitalDisplayMeta {
     public var id: String
     public var displayName: String
@@ -1898,6 +2026,9 @@ public func FfiConverterTypeVitalDisplayMeta_lower(_ value: VitalDisplayMeta) ->
 }
 
 
+/**
+ * Derived scalar physiological value.
+ */
 public struct VitalResult {
     public var value: Float
     public var confidence: Float
@@ -1980,6 +2111,9 @@ public func FfiConverterTypeVitalResult_lower(_ value: VitalResult) -> RustBuffe
 }
 
 
+/**
+ * Derived continuous waveform data alongside unit metadata.
+ */
 public struct WaveformResult {
     public var data: [Float]
     public var confidence: [Float]
@@ -2063,6 +2197,9 @@ public func FfiConverterTypeWaveformResult_lower(_ value: WaveformResult) -> Rus
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Action to be taken on a target ROI after evaluation.
+ */
 
 public enum BufferActionType {
     
@@ -2134,6 +2271,9 @@ extension BufferActionType: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * The origin detector format of the incoming bounding box.
+ */
 
 public enum FaceDetector {
     
@@ -2198,6 +2338,9 @@ extension FaceDetector: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Operational paradigm dictating buffer fill limits.
+ */
 
 public enum InferenceMode {
     
@@ -2262,6 +2405,9 @@ extension InferenceMode: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Pre-defined and custom methods for extracting physical ROIs from a base face bounding box.
+ */
 
 public enum RoiMethod {
     
@@ -2353,12 +2499,24 @@ extension RoiMethod: Equatable, Hashable {}
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Dictates how the session should prune state and yield output waveforms.
+ */
 
 public enum WaveformMode {
     
+    /**
+     * Returns only newly added frames, discarding older history.
+     */
     case incremental
+    /**
+     * Returns a fixed trailing window of data (in seconds).
+     */
     case windowed(seconds: Float
     )
+    /**
+     * Returns the entire history and disables state pruning.
+     */
     case global
 }
 
@@ -2819,6 +2977,20 @@ fileprivate struct FfiConverterDictionaryStringTypeWaveformResult: FfiConverterR
         return dict
     }
 }
+/**
+ * Calculates the Region of Interest (ROI) based on a detected face rectangle.
+ *
+ * # Arguments
+ * * `face` - The base bounding box of the detected face.
+ * * `method` - The extraction method determining the offset values.
+ * * `detector` - The type of face detector used.
+ * * `container_width` - Optional maximum width boundary to clip the ROI.
+ * * `container_height` - Optional maximum height boundary to clip the ROI.
+ * * `force_even` - If true, ensures the resulting ROI has even width and height.
+ *
+ * # Returns
+ * A `Rect` representing the calculated ROI.
+ */
 public func calculateRoi(face: Rect, method: RoiMethod, detector: FaceDetector, containerWidth: Float?, containerHeight: Float?, forceEven: Bool) -> Rect {
     return try!  FfiConverterTypeRect.lift(try! rustCall() {
     uniffi_vitallens_core_fn_func_calculate_roi(
@@ -2838,6 +3010,16 @@ public func computeBufferConfig(config: SessionConfig) -> BufferConfig {
     )
 })
 }
+/**
+ * Computes the Intersection over Union (IoU) of two rectangles.
+ *
+ * # Arguments
+ * * `a` - First rectangle.
+ * * `b` - Second rectangle.
+ *
+ * # Returns
+ * The IoU ratio as a float between 0.0 and 1.0.
+ */
 public func computeIou(a: Rect, b: Rect) -> Float {
     return try!  FfiConverterFloat.lift(try! rustCall() {
     uniffi_vitallens_core_fn_func_compute_iou(
@@ -2853,6 +3035,17 @@ public func getVitalInfo(vitalId: String) -> VitalDisplayMeta? {
     )
 })
 }
+/**
+ * Checks if an inner rectangle is sufficiently contained within an outer rectangle.
+ *
+ * # Arguments
+ * * `inner` - The rectangle to check for containment.
+ * * `outer` - The boundary rectangle.
+ * * `min_overlap_pct` - The minimum required visible fraction of the inner rectangle.
+ *
+ * # Returns
+ * `true` if the visible area meets or exceeds `min_overlap_pct`, otherwise `false`.
+ */
 public func isContained(inner: Rect, outer: Rect, minOverlapPct: Float) -> Bool {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_vitallens_core_fn_func_is_contained(
@@ -2878,40 +3071,40 @@ private var initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_vitallens_core_checksum_func_calculate_roi() != 36547) {
+    if (uniffi_vitallens_core_checksum_func_calculate_roi() != 39504) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_compute_buffer_config() != 60181) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_func_compute_iou() != 40748) {
+    if (uniffi_vitallens_core_checksum_func_compute_iou() != 42017) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_get_vital_info() != 12718) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_func_is_contained() != 19341) {
+    if (uniffi_vitallens_core_checksum_func_is_contained() != 26927) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_method_bufferplanner_evaluate_target() != 28280) {
+    if (uniffi_vitallens_core_checksum_method_bufferplanner_evaluate_target() != 53374) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_method_bufferplanner_is_ready() != 20999) {
+    if (uniffi_vitallens_core_checksum_method_bufferplanner_is_ready() != 62024) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_method_bufferplanner_poll() != 3818) {
+    if (uniffi_vitallens_core_checksum_method_bufferplanner_poll() != 59925) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_method_session_process() != 27116) {
+    if (uniffi_vitallens_core_checksum_method_session_process() != 23803) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_method_session_reset() != 39224) {
+    if (uniffi_vitallens_core_checksum_method_session_reset() != 26380) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_constructor_bufferplanner_new() != 8442) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_constructor_session_new() != 18885) {
+    if (uniffi_vitallens_core_checksum_constructor_session_new() != 38741) {
         return InitializationResult.apiChecksumMismatch
     }
 

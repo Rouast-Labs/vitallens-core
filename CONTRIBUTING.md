@@ -47,20 +47,6 @@ We use a `Makefile` to automate tasks.
 | `make build-<target>` | Compiles release artifacts for `<target>`. |
 | `make clean` | Removes build artifacts (`target/`, `pkg/`, `bindings/swift/`). |
 
-
-## Quick Command Reference (Makefile)
-
-We use a `Makefile` to automate common tasks. To keep development fast, the default `make` command only runs syntax checks and tests. Full optimization and linking are reserved for `make build`.
-
-| Command | Description |
-| --- | --- |
-| `make` | **(Default)** Runs all fast verifications (`cargo check`) and unit tests. |
-| `make build` | Runs full, optimized release builds for Python, iOS, and Web. |
-| `make test` | Runs standard Rust unit tests (`cargo test`). |
-| `make check-<target>` | Runs `cargo check` for a specific target (`python`, `apple`, `web`) without generating artifacts. |
-| `make build-<target>` | Compiles the final release artifacts for a specific target (`python`, `apple`, `web`). |
-| `make clean` | Removes all build artifacts (`target/`, `pkg/`, `bindings/swift/`). |
-
 ## Detailed Workflows
 
 ### Core Rust Logic
@@ -91,3 +77,18 @@ Running `make build-apple` handles compiling for physical devices, Intel/Apple S
 ### Web Bindings (Wasm)
 
 Running `make build-web` compiles the Wasm binary and generates JS/TS glue code into the `pkg/` directory.
+
+## Release Workflow
+
+To publish a new version (e.g., to update the Swift Package):
+
+1. **Bump Version:** Update the `version` string in `Cargo.toml`.
+2. **Prepare Distribution:** Run `make dist-apple`. This zips the framework and automatically updates `Package.swift` with the new checksum and download URL.
+3. **Commit & Tag:**
+    ```bash
+    git add .
+    git commit -m "Release x.y.z"
+    git tag x.y.z
+    git push origin main --tags
+    ```
+4. **GitHub Release:** Create a new release on GitHub matching the tag and upload `target/VitalLensCoreFFI.xcframework.zip`.

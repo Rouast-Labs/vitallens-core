@@ -1,4 +1,4 @@
-.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web clean
+.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web dist-apple clean
 
 default: check
 
@@ -88,8 +88,18 @@ build-web:
 	@echo "✅ Web Build Complete! -> pkg/"
 
 # ==========================================
-# UTILITIES
+# DISTRIBUTION TARGETS
 # ==========================================
+
+dist-apple: build-apple
+	@echo "📦 Zipping XCFramework..."
+	@cd target && zip -yr VitalLensCoreFFI.xcframework.zip VitalLensCoreFFI.xcframework
+	$(eval CHECKSUM=$(shell swift package compute-checksum target/VitalLensCoreFFI.xcframework.zip))
+	$(eval VERSION=$(shell grep '^version =' Cargo.toml | cut -d '"' -f 2))
+	@echo "📝 Updating Package.swift: Version $(VERSION), Checksum $(CHECKSUM)"
+	@sed -i '' 's|url: ".*releases/download/.*/VitalLensCoreFFI.xcframework.zip"|url: "https://github.com/Rouast-Labs/vitallens-core/releases/download/$(VERSION)/VitalLensCoreFFI.xcframework.zip"|' Package.swift
+	@sed -i '' 's|checksum: ".*"|checksum: "$(CHECKSUM)"|' Package.swift
+	@echo "✅ Package.swift updated."
 
 clean:
 	cargo clean
