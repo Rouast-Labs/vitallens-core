@@ -1,12 +1,10 @@
 # Contributing & Development Guide
 
-This document serves as a cheat sheet for setting up the development environment, running tests, and building targets for **VitalLens Core**.
+This guide covers setting up the development environment, running tests, and building targets for **vitallens-core**.
 
 ## Environment Setup
 
-### Prerequisites
-
-Ensure the following toolchains are installed on macOS.
+You need the following toolchains installed (assuming macOS):
 
 **1. Rust & Cargo**
 
@@ -18,10 +16,7 @@ rustup default stable
 **2. Python (Virtual Env & Maturin)**
 
 ```bash
-# Install Python 3.10+
 brew install python@3.10
-
-# Install Maturin globally or in venv
 pip3 install maturin
 ```
 
@@ -33,17 +28,25 @@ curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
 **4. Apple Targets & Tools**
 
-Ensure you have Xcode Command Line Tools installed (required for `lipo` and `xcodebuild`). Then add the necessary Rust compilation targets:
+Ensure Xcode Command Line Tools are installed (required for `lipo` and `xcodebuild`). Add the Rust compilation targets:
 
 ```bash
-rustup target add aarch64-apple-ios
-rustup target add aarch64-apple-ios-sim
-rustup target add x86_64-apple-ios
-rustup target add aarch64-apple-darwin
-rustup target add x86_64-apple-darwin
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
 ```
 
----
+## Build & Test Commands
+
+We use a `Makefile` to automate tasks.
+
+| Command | Description |
+| --- | --- |
+| `make check` | Runs syntax checks across all targets and standard Rust unit tests. Fast. |
+| `make build` | Runs full, optimized release builds for Python, Apple, and Web. |
+| `make test` | Runs standard Rust unit tests (`cargo test`). |
+| `make check-<target>` | Runs `cargo check` for `<target>` (`python`, `apple`, `web`). |
+| `make build-<target>` | Compiles release artifacts for `<target>`. |
+| `make clean` | Removes build artifacts (`target/`, `pkg/`, `bindings/swift/`). |
+
 
 ## Quick Command Reference (Makefile)
 
@@ -58,81 +61,33 @@ We use a `Makefile` to automate common tasks. To keep development fast, the defa
 | `make build-<target>` | Compiles the final release artifacts for a specific target (`python`, `apple`, `web`). |
 | `make clean` | Removes all build artifacts (`target/`, `pkg/`, `bindings/swift/`). |
 
----
-
 ## Detailed Workflows
 
-### 🦀 Core Rust Logic
+### Core Rust Logic
 
-**Run Unit Tests:**
+To run unit tests manually:
 
 ```bash
 cargo test
-# Show print statements (stdout) during tests:
-cargo test -- --nocapture
+cargo test -- --nocapture # Show print statements
+cargo test --test session_tests # Run specific test suite
+cargo test test_logic_irregular_rhythm # Test specific function
 ```
 
-**Run Specific Test:**
+### Python Bindings (PyO3 + Maturin)
 
-```bash
-cargo test --test session_tests
-# Or a specific function
-cargo test test_logic_irregular_rhythm
-```
-
-**Format & Lint:**
-
-```bash
-cargo fmt
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
----
-
-### 🐍 Python Bindings (PyO3 + Maturin)
-
-**Local Development Install:**
-
-This builds the Rust crate and installs it directly into your current active Python virtual environment for immediate testing.
+To test Python bindings locally without building a release wheel:
 
 ```bash
 maturin develop --features python
 ```
 
-**Build Release Wheel:**
+This builds and installs the extension directly into your active virtual environment.
 
-Use the Makefile to generate optimized `.whl` files in `target/wheels/`.
+### Apple Bindings (UniFFI)
 
-```bash
-make build-python
-```
+Running `make build-apple` handles compiling for physical devices, Intel/Apple Silicon simulators, merging binaries via `lipo`, generating Swift headers, and packaging the final XCFramework.
 
----
+### Web Bindings (Wasm)
 
-### 🍎 Apple Bindings (UniFFI)
-
-Building for iOS and macOS requires compiling for physical devices, compiling for Intel/Apple Silicon simulators, merging the simulator binaries using `lipo`, generating Swift headers, and packaging an XCFramework.
-
-**Generate the XCFramework:**
-
-Instead of running these manually, rely on the Makefile to handle the entire pipeline:
-
-```bash
-make build-apple
-```
-
-*Output: `target/VitallensCore.xcframework` and `bindings/swift/VitalLensCore.swift*`
-
----
-
-### 🕸️ Web Bindings (Wasm)
-
-**Build for NPM/Bundler:**
-
-Use the Makefile to compile the WebAssembly binary and generate the JavaScript/TypeScript glue code.
-
-```bash
-make build-web
-```
-
-*Output: The `pkg/` directory, functioning as a standard NPM package.*
+Running `make build-web` compiles the Wasm binary and generates JS/TS glue code into the `pkg/` directory.

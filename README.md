@@ -10,7 +10,7 @@
 
 </div>
 
-`vitallens-core` is the shared signal processing library for [**VitalLens**](https://www.rouast.com/api/). It provides a single Rust codebase that guarantees mathematical parity and high performance across all our client platforms. 
+`vitallens-core` is the shared internal signal processing library for [**VitalLens**](https://www.rouast.com/api/). It provides a single Rust codebase that guarantees mathematical parity and high performance across all our client platforms and SDKs.
 
 ## Targets
 
