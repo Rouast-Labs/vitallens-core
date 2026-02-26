@@ -1,20 +1,26 @@
 use crate::types::{Rect, RoiMethod, FaceDetector};
 
-/// Standard Face Crop (Reduces width to 60%, height to 80%)
+// Offsets for `RoiMethod`
 const FACE_OFFSETS: [f32; 4] = [-0.2, -0.1, -0.2, -0.1];
-
-/// Forehead Crop (Top 15-25% of face)
 const FOREHEAD_OFFSETS: [f32; 4] = [-0.35, -0.15, -0.35, -0.75];
-
-/// Standard Upper Body (Version 1 - Non-Cropped)
 const UPPER_BODY_OFFSETS: [f32; 4] = [0.25, 0.20, 0.25, 0.40];
-
-/// Upper Body Cropped (Version 1 - Cropped)
 const UPPER_BODY_CROPPED_OFFSETS: [f32; 4] = [0.19, 0.1455, 0.19, 0.2769];
 
-/// Offsets to convert other Face Detectors to default
+// Offsets for `FaceDetector`
 const VISION_TO_DEFAULT_OFFSETS: [f32; 4] = [-0.05, 0.1, -0.05, 0.25];
 
+/// Calculates the Region of Interest (ROI) based on a detected face rectangle.
+///
+/// # Arguments
+/// * `face` - The base bounding box of the detected face.
+/// * `method` - The extraction method determining the offset values.
+/// * `detector` - The type of face detector used.
+/// * `container_width` - Optional maximum width boundary to clip the ROI.
+/// * `container_height` - Optional maximum height boundary to clip the ROI.
+/// * `force_even` - If true, ensures the resulting ROI has even width and height.
+///
+/// # Returns
+/// A `Rect` representing the calculated ROI.
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn calculate_roi(
     face: Rect,
@@ -42,6 +48,16 @@ pub fn calculate_roi(
     apply_offsets(base_face, offsets, container, force_even)
 }
 
+/// Applies proportional offsets to a bounding box and optionally clips to container bounds.
+///
+/// # Arguments
+/// * `rect` - The base rectangle.
+/// * `offsets` - An array of 4 floats representing [left, top, right, bottom] offsets as fractions of width/height.
+/// * `container` - Optional (width, height) tuple for clipping.
+/// * `force_even` - If true, rounds dimensions to the nearest even integer.
+///
+/// # Returns
+/// A modified `Rect`.
 fn apply_offsets(
     rect: Rect, 
     offsets: [f32; 4], 
@@ -90,6 +106,14 @@ fn apply_offsets(
     Rect { x: new_x, y: new_y, width: new_w, height: new_h }
 }
 
+/// Normalizes bounding boxes from different face detectors to a standard default coordinate space.
+///
+/// # Arguments
+/// * `rect` - The bounding box to normalize.
+/// * `detector` - The source detector type.
+///
+/// # Returns
+/// A standardized `Rect`.
 fn normalize_face_rect(rect: Rect, detector: FaceDetector) -> Rect {
     match detector {
         FaceDetector::Default => rect,
@@ -99,6 +123,14 @@ fn normalize_face_rect(rect: Rect, detector: FaceDetector) -> Rect {
     }
 }
 
+/// Computes the Intersection over Union (IoU) of two rectangles.
+///
+/// # Arguments
+/// * `a` - First rectangle.
+/// * `b` - Second rectangle.
+///
+/// # Returns
+/// The IoU ratio as a float between 0.0 and 1.0.
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn compute_iou(a: Rect, b: Rect) -> f32 {
     let x_overlap = (a.x + a.width).min(b.x + b.width) - a.x.max(b.x);
@@ -118,6 +150,15 @@ pub fn compute_iou(a: Rect, b: Rect) -> f32 {
     }
 }
 
+/// Checks if an inner rectangle is sufficiently contained within an outer rectangle.
+///
+/// # Arguments
+/// * `inner` - The rectangle to check for containment.
+/// * `outer` - The boundary rectangle.
+/// * `min_overlap_pct` - The minimum required visible fraction of the inner rectangle.
+///
+/// # Returns
+/// `true` if the visible area meets or exceeds `min_overlap_pct`, otherwise `false`.
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 pub fn is_contained(inner: Rect, outer: Rect, min_overlap_pct: f32) -> bool {
     let inner_r = inner.x + inner.width;

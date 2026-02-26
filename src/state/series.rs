@@ -1,5 +1,8 @@
 use std::collections::VecDeque;
 
+/// A running buffer designed to stitch together overlapping time-series segments.
+/// It maintains a running sum and count for each frame index, allowing it to seamlessly
+/// average out overlapping predictions from consecutive inference windows.
 #[derive(Debug, Clone)]
 pub struct SignalBuffer {
     pub sum: VecDeque<f32>,
@@ -8,6 +11,7 @@ pub struct SignalBuffer {
 }
 
 impl SignalBuffer {
+    /// Creates a new, empty `SignalBuffer`.
     pub fn new() -> Self {
         Self {
             sum: VecDeque::new(),
@@ -16,6 +20,14 @@ impl SignalBuffer {
         }
     }
 
+    /// Merges a new segment of data into the buffer, handling overlapping regions by
+    /// accumulating sums and counts. Automatically handles `NaN` values by carrying forward
+    /// the last valid value in non-overlapping regions, or ignoring them in overlapping regions.
+    ///
+    /// # Arguments
+    /// * `data` - The new signal segment to append.
+    /// * `overlap` - The number of frames at the start of `data` that overlap with the end of the existing buffer.
+    /// * `unit` - An optional string representing the unit of measurement.
     pub fn merge(&mut self, data: &[f32], overlap: usize, unit: Option<String>) {
         if self.unit.is_none() {
             self.unit = unit;
@@ -64,6 +76,10 @@ impl SignalBuffer {
         }
     }
 
+    /// Computes the final continuous signal by dividing the accumulated sums by their respective counts.
+    ///
+    /// # Returns
+    /// A `Vec<f32>` containing the averaged signal.
     pub fn compute_average(&self) -> Vec<f32> {
         self.sum
             .iter()
@@ -72,6 +88,10 @@ impl SignalBuffer {
             .collect()
     }
 
+    /// Trims the oldest elements from the front of the buffer to maintain a maximum history size.
+    ///
+    /// # Arguments
+    /// * `keep_count` - The maximum number of recent frames to retain.
     pub fn prune(&mut self, keep_count: usize) {
         if self.sum.len() > keep_count {
             let remove_count = self.sum.len() - keep_count;
@@ -80,6 +100,7 @@ impl SignalBuffer {
         }
     }
 
+    /// Clears all data and counts from the buffer.
     pub fn clear(&mut self) {
         self.sum.clear();
         self.count.clear();
@@ -103,12 +124,7 @@ mod tests {
     #[test]
     fn test_merge_overlap_averages_values() {
         let mut buf = SignalBuffer::new();
-        // Batch 1: [10.0, 20.0]
         buf.merge(&[10.0, 20.0], 0, None);
-        
-        // Batch 2: [30.0, 40.0] with overlap 1
-        // Index 1 overlap: (20 + 30) / 2 = 25
-        // Index 2 new: 40
         buf.merge(&[30.0, 40.0], 1, None);
 
         let avg = buf.compute_average();
@@ -119,14 +135,9 @@ mod tests {
     fn test_merge_overlap_larger_than_data() {
         let mut buf = SignalBuffer::new();
         buf.merge(&[10.0, 20.0, 30.0], 0, None);
-        
-        // Overlap requested is 5, but we only provide 1 new sample [40.0]
-        // This is effectively a complete overlap of the last item provided
-        // Input [40.0] overlaps with index 2 (value 30.0).
         buf.merge(&[40.0], 1, None);
 
         let avg = buf.compute_average();
-        // Index 2: (30 + 40) / 2 = 35
         assert_eq!(avg, vec![10.0, 20.0, 35.0]);
     }
 
@@ -134,9 +145,6 @@ mod tests {
     fn test_nan_in_new_data_is_filled() {
         let mut buf = SignalBuffer::new();
         buf.merge(&[10.0], 0, None);
-        
-        // Merge [NaN, 20.0]
-        // NaN should be replaced by last valid (10.0)
         buf.merge(&[f32::NAN, 20.0], 0, None);
 
         let avg = buf.compute_average();
@@ -146,7 +154,6 @@ mod tests {
     #[test]
     fn test_initial_nan_becomes_zero() {
         let mut buf = SignalBuffer::new();
-        // First value is NaN, defaults to 0.0
         buf.merge(&[f32::NAN, 5.0], 0, None);
         
         let avg = buf.compute_average();
@@ -157,9 +164,6 @@ mod tests {
     fn test_nan_in_overlap_is_ignored() {
         let mut buf = SignalBuffer::new();
         buf.merge(&[10.0, 20.0], 0, None);
-        
-        // Overlap 1 with [NaN, 30.0]
-        // Index 1: 20.0 + NaN (ignored) -> stays 20.0
         buf.merge(&[f32::NAN, 30.0], 1, None);
 
         let avg = buf.compute_average();
@@ -192,13 +196,12 @@ mod tests {
         let mut buf = SignalBuffer::new();
         buf.merge(&[10.0, 20.0, 30.0], 0, None);
         
-        assert_eq!(buf.compute_average().len(), 3, "Buffer should contain 3 items");
+        assert_eq!(buf.compute_average().len(), 3);
         
-        // Trigger clear
         buf.clear();
         
-        assert!(buf.sum.is_empty(), "Sum queue should be empty");
-        assert!(buf.count.is_empty(), "Count queue should be empty");
-        assert_eq!(buf.compute_average().len(), 0, "Average computation should return empty vector");
+        assert!(buf.sum.is_empty());
+        assert!(buf.count.is_empty());
+        assert_eq!(buf.compute_average().len(), 0);
     }
 }

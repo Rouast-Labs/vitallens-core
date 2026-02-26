@@ -9,7 +9,6 @@ use vitallens_core::registry;
 
 const TOLERANCE_IE_RATIO: f32 = 0.15;
 
-// --- LOGGER SETUP ---
 fn init_logger() {
     let _ = env_logger::builder().is_test(true).try_init();
 }

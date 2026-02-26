@@ -1,5 +1,6 @@
 use crate::signal::filters;
 
+/// Represents a detected peak in a signal.
 #[derive(Debug, Clone, Copy)]
 pub struct Peak {
     pub index: usize,
@@ -7,6 +8,7 @@ pub struct Peak {
     pub y: f32,
 }
 
+/// Represents a full physiological cycle (e.g., a breath), bounded by valleys.
 #[derive(Debug, Clone, Copy)]
 pub struct Cycle {
     pub start_valley: Peak, 
@@ -14,12 +16,14 @@ pub struct Cycle {
     pub end_valley: Peak,
 }
 
+/// Defines the operational boundaries for rate detection in BPM.
 #[derive(Debug, Clone, Copy)]
 pub struct SignalBounds {
     pub min_rate: f32,
     pub max_rate: f32,
 }
 
+/// Configuration options for the peak detection algorithm.
 #[derive(Debug, Clone, Copy)]
 pub struct PeakOptions {
     pub fs: f32,
@@ -56,13 +60,16 @@ impl Default for PeakOptions {
     }
 }
 
-// =========================================================================
-// SHARED LOGIC
-// =========================================================================
-
-/// Helper: Handles pre-processing (smoothing) and statistical calculations (Z-Score).
+/// Computes local rolling statistics (mean and standard deviation) for adaptive thresholding.
+/// Optionally applies low-pass smoothing to the input signal prior to calculation.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `options` - Configuration options defining smoothing and window parameters.
+///
+/// # Returns
+/// A `StatsResult` containing the working signal and arrays of local means and standard deviations.
 fn compute_statistics(signal: &[f32], options: &PeakOptions) -> StatsResult {
-    // 1. Preprocessing (Smoothing)
     let smoothed_storage;
     let mut search_radius = 0;
     
@@ -77,7 +84,6 @@ fn compute_statistics(signal: &[f32], options: &PeakOptions) -> StatsResult {
         signal
     };
 
-    // 2. Rolling Statistics (Mean & Std Dev)
     let reference_rate = options.avg_rate_hint.unwrap_or(options.bounds.min_rate);
     let window_seconds = (60.0 / reference_rate) * options.window_cycles;
     
@@ -124,7 +130,15 @@ fn compute_statistics(signal: &[f32], options: &PeakOptions) -> StatsResult {
     }
 }
 
-/// Helper: Refines a peak location using quadratic interpolation.
+/// Refines a peak's integer index into a sub-sample continuous float position
+/// using quadratic interpolation.
+///
+/// # Arguments
+/// * `signal` - The raw signal array.
+/// * `idx` - The integer index of the detected peak.
+///
+/// # Returns
+/// The interpolated sub-sample location as an `f32`.
 fn refine_location(signal: &[f32], idx: usize) -> f32 {
     if idx > 0 && idx < signal.len() - 1 {
         let y_l = signal[idx - 1];
@@ -142,23 +156,26 @@ fn refine_location(signal: &[f32], idx: usize) -> f32 {
     idx as f32
 }
 
-// =========================================================================
-// PUBLIC FUNCTIONS
-// =========================================================================
-
+/// Detects peaks in a physiological signal using adaptive thresholding and refractory periods.
+/// Groups detected peaks into continuous sequences if gaps are present.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `options` - Configuration options defining bounds, thresholds, and smoothing.
+///
+/// # Returns
+/// A vector of peak sequences (`Vec<Vec<Peak>>`). Each sub-vector represents a continuous train of peaks.
 pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     if signal.len() < 3 {
         return Vec::new();
     }
 
-    // Compute statistics
     let stats = compute_statistics(signal, &options);
     let working_signal = &stats.working_signal;
     let means = &stats.means;
     let stds = &stats.stds;
     let search_radius = stats.search_radius;
 
-    // Auto-tune gating parameters
     let max_possible_rate = if let Some(avg) = options.avg_rate_hint {
         let duration = working_signal.len() as f32 / options.fs;
         let drift = options.max_rate_change_per_sec * (duration / 2.0);
@@ -173,7 +190,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
     let slowest_period = 60.0 / options.bounds.min_rate;
     let max_gap_samples = (slowest_period * 2.5 * options.fs) as usize;
     
-    // Peak detection logic
     let mut peaks: Vec<Peak> = Vec::new();
     let mut last_peak_idx: Option<usize> = None;
 
@@ -189,7 +205,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         };
 
         if is_candidate {
-            // Local maxima check on working signal
             if val > working_signal[i-1] && val >= working_signal[i+1] {
                 
                 let in_refractory_window = match last_peak_idx {
@@ -197,7 +212,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
                     None => false
                 };
 
-                // Search for true max in raw signal if smoothing was applied
                 let mut best_idx = i;
                 let mut best_val = signal[i];
 
@@ -242,7 +256,6 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
         }
     }
 
-    // Segmentation
     if peaks.is_empty() {
         return Vec::new();
     }
@@ -268,6 +281,14 @@ pub fn find_peaks(signal: &[f32], options: PeakOptions) -> Vec<Vec<Peak>> {
 
 const EDGE_SEARCH_FRACTION: f32 = 0.6;
 
+/// Detects full physiological cycles (valley-to-valley) based on detected peaks.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `options` - Configuration options for peak detection.
+///
+/// # Returns
+/// A vector of `Cycle` structs representing complete physiological waveforms.
 pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
     if signal.len() < 3 {
         return Vec::new();
@@ -279,7 +300,6 @@ pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
     for segment in peak_segments {
         if segment.is_empty() { continue; }
 
-        // Determine average cycle duration (Samples)
         let avg_cycle_samples = if let Some(rate) = options.avg_rate_hint {
             if rate > 1e-5 {
                 (options.fs * 60.0 / rate).round() as usize
@@ -296,10 +316,8 @@ pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
             (slowest_period * options.fs) as usize
         };
 
-        // Refine edge search window
         let edge_search_window = (avg_cycle_samples as f32 * EDGE_SEARCH_FRACTION) as usize;
 
-        // Intermediate valleys (Between peaks)
         let mut valleys = Vec::new();
         for i in 0..segment.len() - 1 {
             let p_curr = segment[i];
@@ -323,7 +341,6 @@ pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
             }
         }
 
-        // Start valley (Backwards search)
         let p_first = segment[0];
         let v_start_opt = if p_first.index >= edge_search_window {
             let start_limit = p_first.index - edge_search_window;
@@ -335,7 +352,6 @@ pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
             None
         };
 
-        // End valley (Forwards search)
         let p_last = segment[segment.len()-1];
         let v_end_opt = if p_last.index + edge_search_window < signal.len() {
             let end_limit = p_last.index + edge_search_window;
@@ -369,6 +385,15 @@ pub fn find_cycles(signal: &[f32], options: PeakOptions) -> Vec<Cycle> {
     all_cycles
 }
 
+/// Finds the minimum value and its corresponding index within a sub-slice of a signal.
+///
+/// # Arguments
+/// * `signal` - The full signal array.
+/// * `start` - The inclusive starting index.
+/// * `end` - The exclusive ending index.
+///
+/// # Returns
+/// A tuple of `(absolute_index, minimum_value)`.
 fn find_min_in_range(signal: &[f32], start: usize, end: usize) -> (usize, f32) {
     let slice = &signal[start..end];
     if slice.is_empty() {
@@ -387,8 +412,6 @@ fn find_min_in_range(signal: &[f32], start: usize, end: usize) -> (usize, f32) {
 mod tests {
     use super::*;
 
-    // --- Helpers ---
-
     fn mock_sine(fs: f32, freq: f32, duration: f32) -> Vec<f32> {
         (0..(fs * duration) as usize).map(|i| {
             (i as f32 / fs * 2.0 * std::f32::consts::PI * freq).sin()
@@ -401,13 +424,11 @@ mod tests {
         }).collect()
     }
 
-    // --- 1. Physiological Constraints ---
-
     #[test]
     fn peak_01_refractory_hr() {
         let fs = 30.0;
         let mut sig = mock_sine(fs, 1.0, 2.0);
-        sig[14] = 2.0; // The noise spike
+        sig[14] = 2.0; 
 
         let opts = PeakOptions {
             fs,
@@ -449,8 +470,6 @@ mod tests {
 
     #[test]
     fn peak_03_max_rate_gating() {
-        // Max HR is 220 BPM (3.66 Hz).
-        // 6Hz is clearly faster than 3.66Hz, so beats should be skipped.
         let fs = 30.0;
         let sig = mock_sine(fs, 6.0, 2.0); 
         
@@ -465,9 +484,6 @@ mod tests {
         
         if !segments.is_empty() {
             let peaks = &segments[0];
-            // 6Hz * 2s = 12 potential peaks.
-            // Max rate 220 BPM allows ~7 peaks in 2s.
-            // We expect significantly fewer than 12.
             assert!(peaks.len() < 10, "Detected too many peaks ({}) for physical limits", peaks.len());
         }
     }
@@ -478,7 +494,7 @@ mod tests {
         let mut sig = vec![0.0; 50]; 
         sig[10] = 1.0; 
         sig[20] = 1.0; 
-        sig[28] = 1.0; // Premature (Gap = 0.8s)
+        sig[28] = 1.0;  
         sig[38] = 1.0;
 
         let opts = PeakOptions {
@@ -495,8 +511,6 @@ mod tests {
         let found_premature = peaks.iter().any(|p| p.index == 28);
         assert!(found_premature, "Premature valid beat should be detected");
     }
-
-    // --- 2. Robustness ---
 
     #[test]
     fn peak_05_amplitude_flutter() {
@@ -523,13 +537,12 @@ mod tests {
 
     #[test]
     fn peak_06_baseline_wander() {
-        // If drift is too massive, its variance hides the pulse variance.
         let fs = 30.0;
         let pulse = mock_sine(fs, 1.0, 5.0);
         let drift = mock_sine(fs, 0.1, 5.0);
         
         let sig: Vec<f32> = pulse.iter().zip(drift.iter())
-            .map(|(p, d)| p + d * 2.0) // 2x drift is still significant but handleable
+            .map(|(p, d)| p + d * 2.0)  
             .collect();
 
         let opts = PeakOptions {
@@ -546,11 +559,9 @@ mod tests {
 
     #[test]
     fn peak_07_step_function_stability() {
-        // [FIXED] Used helper function
         let fs = 10.0;
         let mut sig = mock_step(fs, 4.0, 2.0, 100.0);
         
-        // Peak at index 20 (The step edge)
         sig[20] = 110.0; 
         sig[19] = 50.0;  
         sig[21] = 105.0; 
@@ -575,8 +586,6 @@ mod tests {
         let segments = find_peaks(&sig, opts);
         assert!(segments.is_empty());
     }
-
-    // --- 3. Precision ---
 
     #[test]
     fn peak_09_sub_sample_precision() {
@@ -619,8 +628,6 @@ mod tests {
         assert!(p.x.is_finite());
         assert!((p.x - 5.0).abs() < 0.6);
     }
-
-    // --- 4. Segmentation ---
 
     #[test]
     fn peak_11_signal_gap() {

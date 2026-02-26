@@ -140,20 +140,17 @@ fn test_session(resource: &str) {
         let vid = &case.vital_id;
         let wave_key = &case.input_signal_key;
 
-        // --- GLOBAL Length Checks ---
         if let Some((data, conf)) = global_waves.get(wave_key) {
             let expected = case.input_data.len();
             assert_eq!(data.len(), expected, "GLOBAL Waveform {} data length mismatch", wave_key);
             assert_eq!(conf.len(), expected, "GLOBAL Waveform {} confidence length mismatch", wave_key);
         }
 
-        // --- INCREMENTAL Length Checks ---
         if let Some((data, conf)) = inc_waves.get(wave_key) {
             assert_eq!(data.len(), case.input_data.len(), "INCREMENTAL total entries mismatch for {}", wave_key);
             assert_eq!(data.len(), conf.len(), "INCREMENTAL {} data/conf length mismatch", wave_key);
         }
 
-        // --- WINDOWED Length Checks ---
         if let Some((data, conf)) = win_waves.get(wave_key) {
             let window_frames = (30.0 * ref_data.fps) as usize;
             let expected_len = window_frames.min(case.input_data.len());
@@ -328,7 +325,6 @@ fn run_session_extraction(
             }
         }
 
-        // Unpack waveforms
         for (key, val) in result.waveforms {
             let entry = waveform_results.entry(key.clone()).or_insert((Vec::new(), Vec::new()));
 
@@ -356,7 +352,6 @@ fn run_session_extraction(
             }
         }
         
-        // Unpack metrics
         for (key, val) in result.vitals {
             final_results.insert(key, (val.value, val.confidence));
         }

@@ -7,7 +7,6 @@ use test_generator::test_resources;
 use vitallens_core::signal::rate;
 use vitallens_core::registry;
 
-// Tolerance for Rate metrics (BPM)
 const RATE_TOLERANCE_BPM: f32 = 3.0;
 
 #[derive(Deserialize, Debug)]
@@ -46,14 +45,11 @@ fn verify_rate(
     rate_hint: Option<f32>
 ) -> Result<(), String> {
     
-    // 1. Get Settings from Registry (Single Source of Truth)
     let meta = registry::get_vital_meta(vital_id)
         .unwrap_or_else(|| panic!("Vital ID '{}' not found in registry", vital_id));
     
-    // Assuming derivation 0 is the primary rate derivation (Periodogram or Peak)
     let deriv = &meta.derivations[0];
 
-    // Check duration (Skip short files to match Session logic)
     let duration_sec = signal.len() as f32 / fs;
     if duration_sec < deriv.min_window_seconds {
         println!("[{}] {} SKIPPED: Duration {:.1}s < Min Window {:.1}s", 
@@ -61,8 +57,6 @@ fn verify_rate(
         return Ok(());
     }
 
-    // --- LOGIC EXTRACTION ---
-    // We match on the method to run the correct estimation
     let (calculated_rate, calculated_conf, method_name) = match deriv.method {
         registry::CalculationMethod::Rate(strategy) => {
             let bounds = rate::RateBounds { 
@@ -70,7 +64,6 @@ fn verify_rate(
                 max: deriv.max_value 
             };
             
-            // Execute
             let result = rate::estimate_rate(
                 signal, 
                 fs, 
@@ -84,9 +77,6 @@ fn verify_rate(
         _ => panic!("Vital '{}' is not configured as a Rate calculation in registry", vital_id)
     };
 
-    // --- VERIFICATION ---
-
-    // 1. Check Confidence Bounds [0.0, 1.0]
     if calculated_conf < 0.0 || calculated_conf > 1.0 {
         return Err(format!(
             "[{}] {} Confidence Out of Bounds. Got {:.4}, Expected [0.0, 1.0]",
@@ -94,7 +84,6 @@ fn verify_rate(
         ));
     }
 
-    // 2. Check Rate Accuracy
     let diff = (calculated_rate - ground_truth_rate).abs();
     
     println!("[{}] {}: Method={}, Calc={:.1}bpm (Conf {:.2}), Ref={:.1}bpm, Diff={:.1}bpm", 
@@ -110,8 +99,6 @@ fn verify_rate(
     }
 }
 
-// --- Main Test Runner ---
-
 #[test_resources("tests/fixtures/*.json")]
 fn test_rate_integrity(resource: &str) {
     let path = Path::new(resource);
@@ -125,11 +112,7 @@ fn test_rate_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    // 1. Verify Heart Rate
     if let (Some(ppg), Some(hr_ref)) = (&ref_data.vital_signs.ppg_waveform, &ref_data.vital_signs.heart_rate) {
-        // Self-referential hint? Ideally for HR we hint with previous HR, but here we test "cold start" 
-        // or provide the answer as hint if we want to test "tracking" stability.
-        // Let's test "Blind" detection first (None) as it's the hardest case.
         if let Err(e) = verify_rate(
             filename, 
             "heart_rate", 
@@ -142,7 +125,6 @@ fn test_rate_integrity(resource: &str) {
         }
     }
 
-    // 2. Verify Respiratory Rate
     if let (Some(resp), Some(rr_ref)) = (&ref_data.vital_signs.respiratory_waveform, &ref_data.vital_signs.respiratory_rate) {
         if let Err(e) = verify_rate(
             filename, 

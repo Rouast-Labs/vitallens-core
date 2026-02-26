@@ -369,12 +369,10 @@ fn test_hrv_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    // Common Data
     let rate_hint = ref_data.vital_signs.heart_rate.as_ref().map(|hr| hr.value);
     
     if let Some(ppg) = &ref_data.vital_signs.ppg_waveform {
         
-        // 1. Verify SDNN
         if let Some(sdnn_ref) = &ref_data.vital_signs.hrv_sdnn {
             if let Err(e) = verify_sdnn(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), sdnn_ref.value, rate_hint
@@ -383,7 +381,6 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        // 2. Verify RMSSD
         if let Some(rmssd_ref) = &ref_data.vital_signs.hrv_rmssd {
             if let Err(e) = verify_rmssd(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), rmssd_ref.value, rate_hint
@@ -392,7 +389,6 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        // 3. Verify LF/HF
         if let Some(lfhf_ref) = &ref_data.vital_signs.hrv_lfhf {
             if let Err(e) = verify_lfhf(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), lfhf_ref.value, rate_hint
@@ -401,7 +397,6 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        // 4. Verify pNN50
         if let Some(pnn50_ref) = &ref_data.vital_signs.hrv_pnn50 {
             if let Err(e) = verify_pnn50(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), pnn50_ref.value, rate_hint
@@ -410,7 +405,6 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        // 5. Verify SD1/SD2
         if let Some(sd1sd2_ref) = &ref_data.vital_signs.hrv_sd1sd2 {
             if let Err(e) = verify_sd1sd2(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), sd1sd2_ref.value, rate_hint
@@ -419,7 +413,6 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
         
-        // 6. Verify Stress Index
         if let Some(si_ref) = &ref_data.vital_signs.stress_index {
             if let Err(e) = verify_stress_index(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), si_ref.value, rate_hint

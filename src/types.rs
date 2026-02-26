@@ -4,8 +4,7 @@ use serde::{Serialize, Deserialize};
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 
-// --- CONFIG ---
-
+/// Configuration for initializing a VitalLens session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))] 
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -19,8 +18,7 @@ pub struct SessionConfig {
     pub roi_method: String,
 }
 
-// --- INPUTS ---
-
+/// A generic wrapper for a single physical signal and its corresponding confidence array.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -29,6 +27,7 @@ pub struct SignalInput {
     pub confidence: Vec<f32>,
 }
 
+/// Input payload representing tracked face bounding boxes over a sequence of frames.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -37,6 +36,7 @@ pub struct FaceInput {
     pub confidence: Vec<f32>,
 }
 
+/// The core batch input object submitted to the session engine for processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -47,6 +47,7 @@ pub struct SessionInput {
 }
 
 impl SessionInput {
+    /// Validates that all provided signals and face inputs share the exact same length as the timestamps.
     pub fn validate_lengths(&self) -> Result<usize, String> {
         let expected_len = self.timestamp.len();
 
@@ -72,13 +73,15 @@ impl SessionInput {
     }
 }
 
-// --- ENUMS ---
-
+/// Dictates how the session should prune state and yield output waveforms.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
 pub enum WaveformMode {
+    /// Returns only newly added frames, discarding older history.
     Incremental,
+    /// Returns a fixed trailing window of data (in seconds).
     Windowed { seconds: f32 },
+    /// Returns the entire history and disables state pruning.
     Global,
 }
 
@@ -106,6 +109,7 @@ impl<'source> FromPyObject<'source> for WaveformMode {
 
 // --- ROI CONFIGURATION ---
 
+/// A simple bounding box definition.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -122,6 +126,7 @@ impl Rect {
     }
 }
 
+/// Pre-defined and custom methods for extracting physical ROIs from a base face bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
 pub enum RoiMethod {
@@ -153,6 +158,7 @@ impl<'source> FromPyObject<'source> for RoiMethod {
     }
 }
 
+/// The origin detector format of the incoming bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
 pub enum FaceDetector {
@@ -177,6 +183,7 @@ impl<'source> FromPyObject<'source> for FaceDetector {
 
 // --- BUFFER MANAGEMENT TYPES ---
 
+/// Operational paradigm dictating buffer fill limits.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
@@ -185,6 +192,7 @@ pub enum InferenceMode {
     File,
 }
 
+/// Capacity constraints and threshold configuration for buffers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -196,6 +204,7 @@ pub struct BufferConfig {
     pub overlap: u32,
 }
 
+/// Action to be taken on a target ROI after evaluation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Enum))]
@@ -205,6 +214,7 @@ pub enum BufferActionType {
     Ignore,
 }
 
+/// The concrete instruction resulting from evaluating a target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -214,6 +224,7 @@ pub struct BufferAction {
     pub roi: Option<Rect>,
 }
 
+/// Identifiable state metadata attached to a specific processing buffer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -225,6 +236,7 @@ pub struct BufferMetadata {
     pub last_seen: f64,
 }
 
+/// Command returned by the BufferPlanner indicating how many frames to extract.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -234,6 +246,7 @@ pub struct InferenceCommand {
     pub keep_count: u32,
 }
 
+/// Aggregated output from the BufferPlanner dictating next steps for all buffers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -244,6 +257,7 @@ pub struct ExecutionPlan {
 
 // --- OUTPUTS ---
 
+/// Derived continuous waveform data alongside unit metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -254,6 +268,7 @@ pub struct WaveformResult {
     pub note: String,
 }
 
+/// Derived scalar physiological value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -264,6 +279,7 @@ pub struct VitalResult {
     pub note: String,
 }
 
+/// Filtered/smoothed output face coordinates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -273,6 +289,7 @@ pub struct FaceResult {
     pub note: Option<String>,
 }
 
+/// The final payload aggregated from a session processing tick.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
@@ -285,6 +302,7 @@ pub struct SessionResult {
     pub message: String,
 }
 
+/// Extracted UI/display properties for a specific vital sign.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]

@@ -12,6 +12,8 @@ use pyo3::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+/// Internal state engine for a continuous tracking session.
+/// Manages historical buffers, timestamps, and calculates vitals iteratively.
 #[derive(Debug)]
 struct SessionCore {
     config: SessionConfig,
@@ -29,6 +31,13 @@ struct SessionCore {
 }
 
 impl SessionCore {
+    /// Initializes a new internal session core.
+    ///
+    /// # Arguments
+    /// * `config` - The configuration parameters for the session.
+    ///
+    /// # Returns
+    /// A new `SessionCore` instance.
     fn new(config: SessionConfig) -> Self {
         let max_history = (config.fps_target * 60.0) as usize;
         
@@ -63,6 +72,14 @@ impl SessionCore {
         }
     }
 
+    /// Processes a new batch of incoming data, updates historical buffers, and derives vitals.
+    ///
+    /// # Arguments
+    /// * `input` - The latest batch of input data including signals, face coordinates, and timestamps.
+    /// * `mode` - The operational mode determining how much output history is returned.
+    ///
+    /// # Returns
+    /// A `SessionResult` containing the calculated vitals, waveforms, and payload metadata.
     fn process(&mut self, input: SessionInput, mode: WaveformMode) -> SessionResult {
         if let Err(msg) = input.validate_lengths() {
             log::error!("[Session] Data mismatch: {}", msg);
@@ -80,6 +97,7 @@ impl SessionCore {
         let overlap = self.merge_timestamps(&input.timestamp);
         self.merge_signals(input.signals, overlap);
         self.merge_face(input.face, overlap, input_len);
+        
         if !matches!(mode, WaveformMode::Global) {
             self.prune_state();
         }
@@ -89,6 +107,7 @@ impl SessionCore {
         self.construct_output(mode, derived_results)
     }
 
+    /// Merges new timestamps into the state, determining how many frames overlap with existing history.
     fn merge_timestamps(&mut self, new_times: &[f64]) -> usize {
         if new_times.is_empty() { return 0; }
         
@@ -106,10 +125,11 @@ impl SessionCore {
                 self.timestamps.extend_from_slice(&new_times[idx..]);
                 overlap
             }
-            None => new_times.len()  
+            None => new_times.len() 
         }
     }
 
+    /// Appends new signal vectors into their respective running buffers using the calculated overlap.
     fn merge_signals(&mut self, signals: HashMap<String, SignalInput>, overlap: usize) {
         for (key, input) in signals {
             let data_buf = self.signal_data.entry(key.clone()).or_insert_with(SignalBuffer::new);
@@ -120,6 +140,7 @@ impl SessionCore {
         }
     }
 
+    /// Merges bounding box coordinates into the historical tracking array.
     fn merge_face(&mut self, face: Option<FaceInput>, overlap: usize, input_len: usize) {
         let new_frames_count = if input_len > overlap { input_len - overlap } else { 0 };
         if new_frames_count == 0 { return; }
@@ -148,6 +169,7 @@ impl SessionCore {
         }
     }
 
+    /// Trims internal buffers to the maximum configured history limit.
     fn prune_state(&mut self) {
         if self.timestamps.len() > self.max_history {
             let remove_count = self.timestamps.len() - self.max_history;
@@ -165,16 +187,20 @@ impl SessionCore {
         }
     }
 
+    /// Executes the required mathematical derivations for all active vitals based on current buffers.
+    ///
+    /// # Arguments
+    /// * `mode` - The extraction mode, dictating how much data to feed into the derivation algorithms.
+    ///
+    /// # Returns
+    /// A `HashMap` mapping vital IDs to their `(value, confidence)` scalar tuples.
     fn perform_derivations(&mut self, mode: &WaveformMode) -> HashMap<String, (f32, f32)> {
         let mut results = HashMap::new();
-         
         let vital_ids: Vec<String> = self.active_vitals.clone();
 
         for vital_id in vital_ids {
             if let Some(meta) = self.vital_metas.get(&vital_id).cloned() { 
                 for cfg in &meta.derivations {
-                    
-                    // Gather sources
                     let mut source_data_bufs = Vec::new();
                     let mut source_conf_bufs = Vec::new();
                     let mut missing_source = false;
@@ -198,7 +224,6 @@ impl SessionCore {
                         continue;
                     }
 
-                    // Align & window
                     let available_len = source_data_bufs.iter().map(|v| v.len()).min().unwrap_or(0);
                     let target_fs = self.config.fps_target;
                     let min_frames = (cfg.min_window_seconds * target_fs) as usize;
@@ -215,10 +240,8 @@ impl SessionCore {
                         }
                     };
 
-                    // Slice the inputs to the latest `take_frames`
                     let mut inputs: Vec<&[f32]> = Vec::with_capacity(source_data_bufs.len());
                     let mut confs: Vec<&[f32]> = Vec::with_capacity(source_conf_bufs.len());
-
                     let fallback_conf = vec![1.0; take_frames];
 
                     for i in 0..source_data_bufs.len() {
@@ -235,7 +258,6 @@ impl SessionCore {
                         }
                     }
 
-                    // Calculate actual FS from timestamps (using the slice duration)
                     let ts_start_idx = self.timestamps.len().saturating_sub(take_frames);
                     let ts_slice = if ts_start_idx < self.timestamps.len() {
                         &self.timestamps[ts_start_idx..]
@@ -248,18 +270,14 @@ impl SessionCore {
                         target_fs
                     };
 
-                    // Calculate average confidence of the primary source
                     let slice_avg_conf = if !confs.is_empty() {
                         confs[0].iter().sum::<f32>() / confs[0].len() as f32
                     } else { 0.0 };
 
-                    // Execute calculation
                     let (val, conf) = match &cfg.method {
                         CalculationMethod::Rate(strategy) => {
                             let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
-                             
                             let hint = results.get("heart_rate").map(|(v, _)| *v);
-                            
                             let res = crate::signal::rate::estimate_rate(
                                 inputs[0], actual_fs, bounds, *strategy, hint, Some(&mut self.fft_scratch)
                             );
@@ -327,8 +345,15 @@ impl SessionCore {
         results
     }
 
+    /// Bundles the evaluated results and requested waveforms into the final returned struct.
+    ///
+    /// # Arguments
+    /// * `mode` - The operational mode determining the span of the returned output.
+    /// * `scalar_results` - Pre-computed vital sign values.
+    ///
+    /// # Returns
+    /// The formatted `SessionResult`.
     fn construct_output(&mut self, mode: WaveformMode, scalar_results: HashMap<String, (f32, f32)>) -> SessionResult {
-         
         let start_index = match mode {
             WaveformMode::Global => 0,
             WaveformMode::Windowed { seconds } => {
@@ -375,12 +400,21 @@ impl SessionCore {
 
         let mut waveforms_out = HashMap::new();
         let mut vitals_out = HashMap::new();
-        let fs = self.config.fps_target;  
 
-        let return_waveforms = self.config.return_waveforms.clone().unwrap_or_default();
         let is_global = matches!(mode, WaveformMode::Global);
+        let return_waveforms = self.config.return_waveforms.clone().unwrap_or_default();
 
-        // Process and extract requested waveforms
+        let actual_global_fs = if self.timestamps.len() > 1 {
+            let duration = self.timestamps.last().unwrap() - self.timestamps.first().unwrap();
+            if duration > 0.0 {
+                (self.timestamps.len() - 1) as f32 / duration as f32
+            } else {
+                self.config.fps_target
+            }
+        } else {
+            self.config.fps_target
+        };
+
         for vital_id in return_waveforms {
             if let Some(meta) = registry::get_vital_meta(&vital_id) {
                 if let VitalType::Provided = meta.vital_type {
@@ -388,11 +422,11 @@ impl SessionCore {
                         let full_data = buf.compute_average();
                         
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
-                            if full_data.len() >= (proc_cfg.min_window_seconds * fs) as usize {
+                            if full_data.len() >= (proc_cfg.min_window_seconds * actual_global_fs) as usize {
                                 crate::signal::filters::apply_processing(
                                     &full_data, 
                                     proc_cfg.operation, 
-                                    fs, // TODO: Uses target fs
+                                    actual_global_fs,  
                                     proc_cfg.min_freq,
                                     proc_cfg.max_freq
                                 )
@@ -431,7 +465,6 @@ impl SessionCore {
             }
         }
 
-        // Extract scalar vitals
         for vital_id in &self.active_vitals {
             if let Some(meta) = self.vital_metas.get(vital_id) {
                 if let Some(&(val, conf_scalar)) = scalar_results.get(vital_id) {
@@ -471,6 +504,7 @@ impl SessionCore {
         }
     }
 
+    /// Hard resets the core state.
     fn reset(&mut self) {
         self.timestamps.clear();
         self.face_coords.clear();
@@ -487,8 +521,7 @@ impl SessionCore {
     }
 }
 
-// --- FFI WRAPPERS ---
-
+/// A thread-safe, stateful session object for processing continuous frame data natively across FFI and Wasm.
 #[derive(Debug)]
 #[cfg_attr(feature = "python", pyclass)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
@@ -499,6 +532,13 @@ pub struct Session {
 
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
 impl Session {
+    /// Creates a new stateful session using the provided configuration.
+    ///
+    /// # Arguments
+    /// * `config` - The configuration parameters dictating target frame rate and model metadata.
+    ///
+    /// # Returns
+    /// A new instance of `Session`.
     #[cfg_attr(not(target_arch = "wasm32"), uniffi::constructor)]
     pub fn new(config: SessionConfig) -> Self {
         Self {
@@ -506,11 +546,21 @@ impl Session {
         }
     }
 
+    /// Processes a new batch of inputs, updating the session's internal state
+    /// and returning the calculated vital signs and waveforms.
+    ///
+    /// # Arguments
+    /// * `input` - The latest batch of input data (signals, face coordinates, timestamps).
+    /// * `mode` - The extraction mode dictating the payload size (Incremental, Windowed, or Global).
+    ///
+    /// # Returns
+    /// A `SessionResult` containing the estimated vitals, waveforms, and metadata.
     pub fn process(&self, input: SessionInput, mode: WaveformMode) -> SessionResult {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
         guard.process(input, mode)
     }
 
+    /// Resets the internal state of the session, clearing all historical buffers.
     pub fn reset(&self) {
         let mut guard = self.core.lock().expect("Failed to lock Session core");
         guard.reset();
@@ -604,7 +654,6 @@ mod tests {
     fn test_session_validation_mismatch() {
         let session = Session::new(mock_config(30.0));
         
-        // 3 timestamps, but only 2 signal data points
         let input = mock_input(vec![0.0, 1.0, 2.0], vec![1.0, 2.0]);
         let result = session.process(input, WaveformMode::Global);
 
@@ -616,13 +665,11 @@ mod tests {
     fn test_session_incremental_mode() {
         let session = Session::new(mock_config(1.0));
 
-        // First pass: send 3 frames
         let input1 = mock_input(vec![0.0, 1.0, 2.0], vec![10.0, 11.0, 12.0]);
         let res1 = session.process(input1, WaveformMode::Incremental);
         
         assert_eq!(res1.timestamp.len(), 3, "Initial incremental should return all 3 frames");
 
-        // Second pass: send 3 frames, but 2 overlap with the previous input
         let input2 = mock_input(vec![1.0, 2.0, 3.0], vec![11.0, 12.0, 13.0]);
         let res2 = session.process(input2, WaveformMode::Incremental);
 
@@ -633,15 +680,13 @@ mod tests {
 
     #[test]
     fn test_session_windowed_mode() {
-        let session = Session::new(mock_config(1.0)); // 1 FPS
+        let session = Session::new(mock_config(1.0));  
 
-        // Send 5 seconds of data
         let input = mock_input(
             vec![0.0, 1.0, 2.0, 3.0, 4.0], 
             vec![10.0, 20.0, 30.0, 40.0, 50.0]
         );
         
-        // Request a 3-second window
         let result = session.process(input, WaveformMode::Windowed { seconds: 3.0 });
 
         assert_eq!(result.timestamp.len(), 3, "Windowed mode should restrict output to exactly 3 frames");
@@ -651,16 +696,13 @@ mod tests {
 
     #[test]
     fn test_session_history_pruning() {
-        // Max history is fps * 60 seconds. At 1 FPS, max history is 60 frames.
         let session = Session::new(mock_config(1.0));
 
-        // Create 100 frames of data
         let timestamps: Vec<f64> = (0..100).map(|x| x as f64).collect();
         let data: Vec<f32> = (0..100).map(|x| x as f32).collect();
         
         let input = mock_input(timestamps, data);
         
-        // Use Incremental instead of Global so prune_state() is triggered
         let result = session.process(input, WaveformMode::Incremental);
 
         assert_eq!(
@@ -679,15 +721,12 @@ mod tests {
     fn test_session_reset() {
         let session = Session::new(mock_config(30.0));
 
-        // 1. Send initial batch
         let input1 = mock_input(vec![0.0, 0.1, 0.2], vec![1.0, 2.0, 3.0]);
         let res1 = session.process(input1, WaveformMode::Global);
         assert_eq!(res1.timestamp.len(), 3);
 
-        // 2. Clear state
         session.reset();
 
-        // 3. Send new batch with completely different timeline
         let input2 = mock_input(vec![5.0, 5.1], vec![4.0, 5.0]);
         let res2 = session.process(input2, WaveformMode::Global);
 

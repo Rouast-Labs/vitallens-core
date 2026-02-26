@@ -1,23 +1,28 @@
 use crate::signal::{fft, peaks};
 use crate::signal::peaks::Peak;
 
+/// Defines the minimum and maximum physiological bounds for rate estimation in BPM.
 #[derive(Debug, Clone, Copy)]
 pub struct RateBounds {
     pub min: f32,
     pub max: f32,
 }
 
+/// Defines the algorithmic strategy used to estimate a rate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RateStrategy {
+    /// Uses a Fast Fourier Transform (FFT) periodogram to find the dominant frequency.
     Periodogram {
         target_res_hz: f32,
     },
+    /// Uses time-domain peak detection and calculates rate from median interval distances.
     PeakDetection {
         refine: bool,
         interval_buffer: f32,
     },
 }
 
+/// Represents the result of a rate estimation operation.
 #[derive(Debug, Clone)]
 pub struct RateResult {
     pub value: f32,
@@ -25,6 +30,18 @@ pub struct RateResult {
     pub method: String,
 }
 
+/// Estimates the dominant rate (e.g., Heart Rate, Respiratory Rate) of a signal.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `fs` - The sampling frequency in Hz.
+/// * `bounds` - The allowed physiological bounds for the rate in BPM.
+/// * `strategy` - The calculation method to use (`Periodogram` or `PeakDetection`).
+/// * `rate_hint` - An optional prior rate in BPM to guide detection algorithms.
+/// * `scratch` - An optional mutable reference to an `FftScratch` buffer to avoid reallocations.
+///
+/// # Returns
+/// A `RateResult` containing the estimated rate, a confidence score (0.0 to 1.0), and the method used.
 pub fn estimate_rate(
     signal: &[f32],
     fs: f32,
@@ -46,7 +63,6 @@ pub fn estimate_rate(
             }
         },
         RateStrategy::PeakDetection { refine, interval_buffer } => {
-            
             let options = peaks::PeakOptions {
                 fs,
                 avg_rate_hint: rate_hint,
@@ -56,17 +72,23 @@ pub fn estimate_rate(
                 },
                 interval_buffer,
                 refine,
-                
                 ..Default::default()
             };
 
             let segments = peaks::find_peaks(signal, options);
-            
             calculate_from_peaks(segments, fs)
         }
     }
 }
 
+/// Calculates the average rate from detected sequences of peaks based on interval distances.
+///
+/// # Arguments
+/// * `segments` - A vector of contiguous peak sequences.
+/// * `fs` - The sampling frequency in Hz.
+///
+/// # Returns
+/// A `RateResult` containing the estimated rate and confidence derived from the coefficient of variation.
 fn calculate_from_peaks(segments: Vec<Vec<Peak>>, fs: f32) -> RateResult {
     if segments.is_empty() {
         return RateResult { value: 0.0, confidence: 0.0, method: "PeakDetection".to_string() };

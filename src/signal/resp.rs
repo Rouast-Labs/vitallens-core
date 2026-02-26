@@ -1,5 +1,18 @@
 use crate::signal::peaks::{find_cycles, PeakOptions, SignalBounds};
 
+/// Calculates the Inspiration-to-Expiration (I:E) ratio from a respiratory waveform.
+/// Detects full respiratory cycles to compute the average duration of the inspiratory 
+/// and expiratory phases.
+///
+/// # Arguments
+/// * `signal` - The respiratory waveform data.
+/// * `fs` - The sampling frequency in Hz.
+/// * `confidence` - Array of confidence scores corresponding to the signal.
+/// * `bounds` - Bounding rates for expected respiration in BPM.
+/// * `rate_hint` - Optional prior respiratory rate hint in BPM.
+///
+/// # Returns
+/// A tuple of `(ie_ratio, confidence_score)`.
 pub fn calculate_ie_ratio(
     signal: &[f32], 
     fs: f32, 
@@ -22,7 +35,6 @@ pub fn calculate_ie_ratio(
     log::debug!("[Resp] Calculating I:E. Fs: {:.1}, Bounds: [{:.1}-{:.1}], Rate Hint: {:?}", 
         fs, bounds.min_rate, bounds.max_rate, rate_hint);
 
-    // Use the integrated state machine detector
     let cycles = find_cycles(signal, opts);
 
     if cycles.is_empty() {
@@ -38,16 +50,13 @@ pub fn calculate_ie_ratio(
     let mut count = 0;
 
     for (i, cycle) in cycles.iter().enumerate() {
-        // Calculate duration based on refined x-coordinates
         let t_insp = (cycle.peak.x - cycle.start_valley.x) / fs;
         let t_exp = (cycle.end_valley.x - cycle.peak.x) / fs;
 
-        // Sanity check: durations must be positive
         if t_insp > 0.0 && t_exp > 0.0 {
             total_insp_time += t_insp;
             total_exp_time += t_exp;
 
-            // Weigh confidence
             let conf = if cycle.peak.index < confidence.len() {
                 confidence[cycle.peak.index]
             } else {
@@ -68,7 +77,6 @@ pub fn calculate_ie_ratio(
         return (0.0, 0.0);
     }
 
-    // Calculate averages
     let avg_insp = total_insp_time / count as f32;
     let avg_exp = total_exp_time / count as f32;
     let avg_conf = total_confidence / count as f32;
@@ -89,8 +97,6 @@ pub fn calculate_ie_ratio(
 mod tests {
     use super::*;
 
-    /// Generates a synthetic respiration signal
-    /// insp_ratio: 0.5 means symmetrical (1:1), 0.33 means 1:2 ratio
     fn mock_resp_signal(fs: f32, duration_sec: f32, breath_rate_bpm: f32, insp_ratio: f32) -> Vec<f32> {
         let total_samples = (fs * duration_sec) as usize;
         let mut signal = Vec::with_capacity(total_samples);
@@ -99,10 +105,8 @@ mod tests {
         for i in 0..total_samples {
             let phase = (i % samples_per_breath) as f32 / samples_per_breath as f32;
             let val = if phase < insp_ratio {
-                // Inhalation (Up) - Removed the () here
                 phase / insp_ratio
             } else {
-                // Exhalation (Down)
                 1.0 - ((phase - insp_ratio) / (1.0 - insp_ratio))
             };
             signal.push(val);
@@ -124,14 +128,12 @@ mod tests {
     #[test]
     fn test_ie_ratio_classic_human() {
         let fs = 20.0;
-        // 1:2 ratio (Inhalation is 1/3 of total breath)
         let signal = mock_resp_signal(fs, 60.0, 15.0, 0.333);
         let confidence = vec![1.0; signal.len()];
         let bounds = SignalBounds { min_rate: 4.0, max_rate: 60.0 };
 
         let (ratio, _) = calculate_ie_ratio(&signal, fs, &confidence, bounds, None);
         
-        // Expected ~0.5
         assert!((ratio - 0.5).abs() < 0.1, "Expected ratio ~0.5, got {}", ratio);
     }
 
@@ -151,7 +153,7 @@ mod tests {
     fn test_ie_ratio_confidence_weighting() {
         let fs = 10.0;
         let signal = mock_resp_signal(fs, 20.0, 12.0, 0.5);
-        // Half the signal is low confidence
+        
         let mut confidence = vec![1.0; signal.len()];
         for i in (signal.len()/2)..signal.len() {
             confidence[i] = 0.2;

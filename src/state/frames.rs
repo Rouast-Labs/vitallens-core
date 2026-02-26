@@ -6,6 +6,8 @@ const MAX_STREAM_POLICY_FRAMES: u32 = 150;
 const BASE64_OVERHEAD: f64 = 1.3333;
 
 impl BufferConfig {
+    /// Generates a buffer configuration dynamically based on the session parameters 
+    /// and network payload constraints.
     pub fn from_session_config(config: &SessionConfig) -> Self {
         let n_inputs = config.n_inputs as u32;
         let input_size = config.input_size as u32;
@@ -13,7 +15,6 @@ impl BufferConfig {
         let min_with_state = n_inputs;
         let min_no_state = 16.max(n_inputs);
 
-        // Payload capacity calculation
         let bytes_per_frame = (input_size * input_size * 3) as f64;
         let raw_capacity_bytes = MAX_BASE64_BYTES / BASE64_OVERHEAD;
         let calculated_max = (raw_capacity_bytes / bytes_per_frame).floor() as u32;
@@ -21,7 +22,6 @@ impl BufferConfig {
         let file_max = calculated_max;
         let stream_max = MAX_STREAM_POLICY_FRAMES.min(calculated_max);
 
-        // Standard overlap logic
         let overlap = n_inputs.saturating_sub(1);
 
         Self {
@@ -39,6 +39,7 @@ pub fn compute_buffer_config(config: SessionConfig) -> BufferConfig {
     BufferConfig::from_session_config(&config)
 }
 
+/// Manages the tracking, matching, and lifecycle of video frame buffers across a session.
 #[derive(Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
 pub struct BufferPlanner {
@@ -58,7 +59,16 @@ impl BufferPlanner {
         }
     }
 
-    /// Evaluates a target ROI against the list of known buffers.
+    /// Evaluates a target ROI against the list of known active buffers using 
+    /// Intersection over Union (IoU) to maintain spatial consistency.
+    ///
+    /// # Arguments
+    /// * `target_roi` - The bounding box of the newly detected subject.
+    /// * `timestamp` - The current frame's timestamp.
+    /// * `active_buffers` - Metadata of currently tracked buffers.
+    ///
+    /// # Returns
+    /// A `BufferAction` instructing the caller to either append to an existing buffer or create a new one.
     pub fn evaluate_target(&self, target_roi: Rect, timestamp: f64, active_buffers: Vec<BufferMetadata>) -> BufferAction {
         let mut best_id = None;
         let mut max_iou = -1.0;
@@ -92,7 +102,18 @@ impl BufferPlanner {
         }
     }
 
-    /// Determines which buffer gets consumed, and which buffers should be dropped.
+    /// Determines which buffer (if any) is ready for inference execution, and identifies 
+    /// stale buffers that should be dropped from memory.
+    ///
+    /// # Arguments
+    /// * `active_buffers` - Metadata of currently tracked buffers.
+    /// * `current_time` - The current execution timestamp.
+    /// * `mode` - The operational mode (Stream or File).
+    /// * `has_state` - Whether the engine has warmed up with prior state.
+    /// * `flush` - If true, forces the consumption of the buffer regardless of capacity limits.
+    ///
+    /// # Returns
+    /// An `ExecutionPlan` containing an optional command to execute inference, and a list of buffer IDs to drop.
     pub fn poll(
         &self, 
         active_buffers: Vec<BufferMetadata>, 
@@ -105,31 +126,27 @@ impl BufferPlanner {
         let mut command = None;
         let mut buffers_to_drop = Vec::new();
 
-        // Automatically mark any buffers that exceed the timeout limit for deletion
         for meta in &active_buffers {
             if (current_time - meta.last_seen) > self.timeout_seconds {
                 buffers_to_drop.push(meta.id.clone());
             }
         }
 
-        // Filter to candidates that are both alive and meet frame count limits
         let mut ready_candidates: Vec<&BufferMetadata> = active_buffers.iter()
             .filter(|meta| !buffers_to_drop.contains(&meta.id))
             .filter(|meta| self.is_ready(meta.count, mode, has_state, flush))
             .collect();
 
-        // Sort descending by creation date (newest buffer wins)
         ready_candidates.sort_by(|a, b| {
             b.created_at.partial_cmp(&a.created_at).unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Resolve the winner and generate execution limits
         if let Some(winner) = ready_candidates.first() {
             let winner_id = winner.id.clone();
             let winner_created_at = winner.created_at;
 
             let take_count = if flush {
-                winner.count // TODO: How do we make sure this is not > max?
+                winner.count.min(self.config.file_max)
             } else {
                 match mode {
                     InferenceMode::Stream => winner.count.min(self.config.stream_max),
@@ -145,7 +162,6 @@ impl BufferPlanner {
                 keep_count,
             });
 
-            // Mark any buffer older than the winner for deletion to prevent zombies
             for meta in &active_buffers {
                 if meta.created_at < winner_created_at && !buffers_to_drop.contains(&meta.id) {
                     buffers_to_drop.push(meta.id.clone());
@@ -159,7 +175,7 @@ impl BufferPlanner {
         }
     }
 
-    /// Determines if a buffer is actionable based on configuration constraints.
+    /// Determines if a specific buffer is actionable based on volume and configuration constraints.
     fn is_ready(&self, count: u32, mode: InferenceMode, has_state: bool, flush: bool) -> bool {
         let min_required = if has_state { self.config.min_with_state } else { self.config.min_no_state };
 
@@ -188,7 +204,6 @@ mod tests {
         }
     }
 
-    /// Helper to easily construct metadata for tests
     fn meta(id: &str, count: u32, created_at: f64, last_seen: f64) -> BufferMetadata {
         BufferMetadata {
             id: id.to_string(),
@@ -198,10 +213,6 @@ mod tests {
             last_seen,
         }
     }
-
-    // ==========================================
-    // Configuration Tests
-    // ==========================================
 
     #[test]
     fn test_buffer_config_math() {
@@ -217,18 +228,12 @@ mod tests {
         let buf_cfg = BufferConfig::from_session_config(&config);
         
         assert_eq!(buf_cfg.min_with_state, 5);
-        assert_eq!(buf_cfg.min_no_state, 16); // 16.max(5)
-        assert_eq!(buf_cfg.overlap, 4); // 5 - 1
+        assert_eq!(buf_cfg.min_no_state, 16);  
+        assert_eq!(buf_cfg.overlap, 4);  
         
-        // RAW capacity = MAX_BASE64_BYTES / BASE64_OVERHEAD = 5760000 / 1.3333 ≈ 4320108.0
-        // Calculated max frames = 4320108.0 / 30000 = 144
         assert_eq!(buf_cfg.file_max, 144);
-        assert_eq!(buf_cfg.stream_max, 144); // 150.min(144)
+        assert_eq!(buf_cfg.stream_max, 144);  
     }
-
-    // ==========================================
-    // Stateless Target Evaluation Tests
-    // ==========================================
 
     #[test]
     fn test_evaluate_target_creates_new_when_empty() {
@@ -246,7 +251,7 @@ mod tests {
     fn test_evaluate_target_keeps_alive_on_match() {
         let planner = BufferPlanner::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
-        let roi2 = Rect::new(5.0, 5.0, 100.0, 100.0); // High overlap (IoU)
+        let roi2 = Rect::new(5.0, 5.0, 100.0, 100.0); 
         
         let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
 
@@ -261,7 +266,7 @@ mod tests {
     fn test_evaluate_target_low_iou_creates_new() {
         let planner = BufferPlanner::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
-        let roi2 = Rect::new(500.0, 500.0, 100.0, 100.0); // No overlap
+        let roi2 = Rect::new(500.0, 500.0, 100.0, 100.0); 
         
         let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
 
@@ -276,28 +281,20 @@ mod tests {
         let planner = BufferPlanner::new(mock_config());
         let roi1 = Rect::new(0.0, 0.0, 100.0, 100.0);
         
-        // This buffer has not been seen in 10 seconds (timeout is 5.0)
         let active = vec![BufferMetadata { id: "b1".to_string(), roi: roi1, count: 5, created_at: 1.0, last_seen: 1.0 }];
 
-        // Evaluate at timestamp 11.0
         let res = planner.evaluate_target(roi1, 11.0, active);
         
-        assert_eq!(res.action, BufferActionType::Create, "Should ignore stale buffer and create new");
+        assert_eq!(res.action, BufferActionType::Create);
     }
-
-    // ==========================================
-    // Stateless Execution Polling Tests
-    // ==========================================
 
     #[test]
     fn test_file_mode_wait_logic() {
         let planner = BufferPlanner::new(mock_config());
 
-        // Under limit
         let plan1 = planner.poll(vec![meta("b1", 100, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
-        assert!(plan1.command.is_none()); // 100 < file_max (900)
+        assert!(plan1.command.is_none());  
 
-        // Over limit
         let plan2 = planner.poll(vec![meta("b1", 900, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
         assert!(plan2.command.is_some());
         assert_eq!(plan2.command.unwrap().take_count, 900);
@@ -307,7 +304,6 @@ mod tests {
     fn test_file_mode_flush() {
         let planner = BufferPlanner::new(mock_config());
         
-        // Force flush override with only 20 frames (limit is 900)
         let plan = planner.poll(vec![meta("b1", 20, 1.0, 1.0)], 1.0, InferenceMode::File, false, true);
         
         assert!(plan.command.is_some());
@@ -325,7 +321,6 @@ mod tests {
     fn test_stream_mode_cap_take_count() {
         let planner = BufferPlanner::new(mock_config());
         
-        // 200 exceeds stream_max (150)
         let plan = planner.poll(vec![meta("b1", 200, 1.0, 1.0)], 1.0, InferenceMode::Stream, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.take_count, 150); 
@@ -335,7 +330,6 @@ mod tests {
     fn test_file_mode_cap_take_count() {
         let planner = BufferPlanner::new(mock_config());
         
-        // 1000 exceeds file_max (900)
         let plan = planner.poll(vec![meta("b1", 1000, 1.0, 1.0)], 1.0, InferenceMode::File, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.take_count, 900);
@@ -343,20 +337,20 @@ mod tests {
 
     #[test]
     fn test_stateful_inference_threshold() {
-        let planner = BufferPlanner::new(mock_config()); // min_no_state = 16, min_with_state = 4
+        let planner = BufferPlanner::new(mock_config());  
         
         let active = vec![meta("b1", 5, 1.0, 1.0)];
         
         let plan_no_state = planner.poll(active.clone(), 1.0, InferenceMode::Stream, false, false);
-        assert!(plan_no_state.command.is_none()); // 5 < 16, so it waits
+        assert!(plan_no_state.command.is_none());  
         
         let plan_with_state = planner.poll(active, 1.0, InferenceMode::Stream, true, false);
-        assert!(plan_with_state.command.is_some()); // 5 >= 4, so it executes
+        assert!(plan_with_state.command.is_some());  
     }
 
     #[test]
     fn test_overlap_keep_count() {
-        let planner = BufferPlanner::new(mock_config()); // overlap = 3
+        let planner = BufferPlanner::new(mock_config());  
         let plan = planner.poll(vec![meta("b1", 20, 1.0, 1.0)], 1.0, InferenceMode::Stream, false, false);
         let cmd = plan.command.unwrap();
         assert_eq!(cmd.keep_count, 3);
@@ -367,17 +361,16 @@ mod tests {
         let planner = BufferPlanner::new(mock_config());
         
         let active = vec![
-            meta("b1", 20, 1.0, 5.0), // Oldest
-            meta("b2", 20, 2.0, 5.0), // Middle
-            meta("b3", 20, 3.0, 5.0), // Newest
+            meta("b1", 20, 1.0, 5.0),  
+            meta("b2", 20, 2.0, 5.0),  
+            meta("b3", 20, 3.0, 5.0),  
         ];
         
         let plan = planner.poll(active, 5.0, InferenceMode::Stream, false, false);
         
         let cmd = plan.command.unwrap();
-        assert_eq!(cmd.buffer_id, "b3"); // Newest wins
+        assert_eq!(cmd.buffer_id, "b3");  
         
-        // Any ready buffers older than the winner should be dropped
         assert_eq!(plan.buffers_to_drop.len(), 2);
         assert!(plan.buffers_to_drop.contains(&"b1".to_string()));
         assert!(plan.buffers_to_drop.contains(&"b2".to_string()));
@@ -388,14 +381,14 @@ mod tests {
         let planner = BufferPlanner::new(mock_config());
         
         let active = vec![
-            meta("b1", 2, 10.0, 10.0), // Fresh, but not enough frames (2 < 16)
-            meta("b2", 2, 1.0, 1.0)    // Stale (Current time 10.0 - 1.0 = 9.0 > 5.0)
+            meta("b1", 2, 10.0, 10.0),  
+            meta("b2", 2, 1.0, 1.0)     
         ]; 
         
         let plan = planner.poll(active, 10.0, InferenceMode::Stream, false, false);
         
-        assert!(plan.command.is_none()); // Nobody wins
+        assert!(plan.command.is_none());  
         assert_eq!(plan.buffers_to_drop.len(), 1);
-        assert_eq!(plan.buffers_to_drop[0], "b2"); // Stale is culled
+        assert_eq!(plan.buffers_to_drop[0], "b2");  
     }
 }

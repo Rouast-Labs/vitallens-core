@@ -7,11 +7,8 @@ use test_generator::test_resources;
 use vitallens_core::signal::peaks;
 use vitallens_core::registry;
 
-// Tolerance in samples for matching a detected peak to a ground truth peak (Spatial Matching)
 const MATCHING_TOLERANCE_PPG: i32 = 1;
 const MATCHING_TOLERANCE_RESP: i32 = 3;
-
-// --- JSON Data Structures ---
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
@@ -36,11 +33,7 @@ struct Waveform {
 #[derive(Deserialize, Debug)]
 struct Vital {
     value: f32,
-    #[allow(dead_code)] // TODO: Why dont we use this anymore?
-    confidence: f32,
 }
-
-// --- Verification Logic ---
 
 #[allow(clippy::too_many_arguments)]
 fn verify_peaks(
@@ -57,7 +50,6 @@ fn verify_peaks(
     rate_hint: Option<f32>
 ) -> Result<(), String> {
     
-    // 1. Single Source of Truth: Get Limits from Registry
     let vital_id = if name.contains("PPG") {
         "heart_rate"
     } else {
@@ -70,7 +62,6 @@ fn verify_peaks(
     let deriv = meta.derivations.first().expect("Vital has no derivations");
     let (min_rate, max_rate) = (deriv.min_value, deriv.max_value);
 
-    // 2. Configure Detector
     let opts = peaks::PeakOptions {
         fs,
         bounds: peaks::SignalBounds { min_rate, max_rate },
@@ -89,7 +80,6 @@ fn verify_peaks(
         .flat_map(|seg| seg.iter().map(|p| p.x.round() as usize))
         .collect();
 
-    // 3. Match Peaks
     let mut missed_peaks = Vec::new();
     for &gt_idx in ground_truth {
         let is_found = detected_indices.iter().any(|&det_idx| {
@@ -110,10 +100,8 @@ fn verify_peaks(
         }
     }
 
-    // 4. Calculate Duration-Based Tolerances
     let duration_mins = signal.len() as f32 / fs / 60.0;
     
-    // Per-minute allowed errors
     let (missed_rate, extra_rate) = if name.contains("PPG") {
         if rate_hint.is_some() { (1.0, 0.0) } else { (2.0, 4.0) } 
     } else {
@@ -125,8 +113,7 @@ fn verify_peaks(
 
     let passed = missed_peaks.len() <= allowed_misses && false_positives.len() <= allowed_extras;
 
-    // --- LOGGING ---
-    println!("\n=== CHECK: [{}] {} ===", filename, name); // UPDATED LOG HEADER
+    println!("\n=== CHECK: [{}] {} ===", filename, name);
     println!("  -> Settings: Range [{:.1}-{:.1}] BPM, Hint: {:?}", min_rate, max_rate, rate_hint);
     println!("  -> Duration: {:.2}s ({:.3} mins)", signal.len() as f32 / fs, duration_mins);
     println!("  -> Limits:   Max Missed: {} (Rate {:.1}), Max Extra: {} (Rate {:.1})", 
@@ -153,12 +140,10 @@ fn verify_peaks(
     }
 }
 
-// --- Test Runner ---
-
 #[test_resources("tests/fixtures/*.json")]
 fn test_data_integrity(resource: &str) {
     let path = Path::new(resource);
-    let filename = path.file_name().unwrap().to_str().unwrap(); // Extract filename string
+    let filename = path.file_name().unwrap().to_str().unwrap();
     let file = File::open(path).expect("Failed to open file");
     let reader = BufReader::new(file);
     
@@ -168,10 +153,8 @@ fn test_data_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    // 1. Test PPG
     if let Some(ppg) = ref_data.vital_signs.ppg_waveform {
         if let Some(ground_truth) = ppg.peak_indices {
-            // Case A: Blind
             if let Err(e) = verify_peaks(
                 filename, "PPG-Blind", fs, &ppg.data, &ground_truth, 
                 MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 1.0, None 
@@ -179,7 +162,6 @@ fn test_data_integrity(resource: &str) {
                 failures.push(e);
             }
 
-            // Case B: Hinted
             if let Some(hr) = ref_data.vital_signs.heart_rate {
                 if let Err(e) = verify_peaks(
                     filename, "PPG-Hinted", fs, &ppg.data, &ground_truth, 
@@ -191,10 +173,8 @@ fn test_data_integrity(resource: &str) {
         }
     }
 
-    // 2. Test Respiration
     if let Some(resp) = ref_data.vital_signs.respiratory_waveform {
         if let Some(ground_truth) = resp.peak_indices {
-            // Case A: Blind
             if let Err(e) = verify_peaks(
                 filename, "RESP-Blind", fs, &resp.data, &ground_truth, 
                 MATCHING_TOLERANCE_RESP, false, 1.2, 1.5, 0.25, None 
@@ -202,7 +182,6 @@ fn test_data_integrity(resource: &str) {
                 failures.push(e);
             }
 
-            // Case B: Hinted
             if let Some(rr) = ref_data.vital_signs.respiratory_rate {
                 if let Err(e) = verify_peaks(
                     filename, "RESP-Hinted", fs, &resp.data, &ground_truth, 
@@ -214,7 +193,6 @@ fn test_data_integrity(resource: &str) {
         }
     }
 
-    // Report results
     if !failures.is_empty() {
         panic!(
             "\n\nTest failed for file: {:?}\n==================================================\n{}\n", 

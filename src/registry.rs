@@ -1,11 +1,13 @@
 use crate::signal::rate::RateStrategy;
 
+/// Differentiates between raw signals provided by the model and metrics derived from them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VitalType {
     Provided,
     Derived,
 }
 
+/// Defines the rules and constraints for deriving a vital sign from parent signals.
 #[derive(Debug, Clone)]
 pub struct DerivationConfig {
     pub sources: Vec<String>,
@@ -17,6 +19,7 @@ pub struct DerivationConfig {
     pub order: u8, 
 }
 
+/// Supported Heart Rate Variability (HRV) metrics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HrvMetric {
     Sdnn,
@@ -27,6 +30,7 @@ pub enum HrvMetric {
     Sd1Sd2,
 }
 
+/// The mathematical method used to calculate a derived vital sign.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CalculationMethod {
     Rate(RateStrategy),
@@ -40,6 +44,7 @@ pub enum CalculationMethod {
     IeRatio,
 }
 
+/// Signal processing operations applied to raw waveforms before returning them.
 #[derive(Debug, Clone, Copy)]
 pub enum PostProcessOp {
     None,
@@ -50,6 +55,7 @@ pub enum PostProcessOp {
     DetrendMovingAverageStandardize,
 }
 
+/// Configuration for waveform post-processing.
 #[derive(Debug, Clone)]
 pub struct ProcessingConfig {
     pub operation: PostProcessOp, 
@@ -58,6 +64,7 @@ pub struct ProcessingConfig {
     pub max_freq: Option<f32>,
 }
 
+/// Static metadata defining a vital sign's properties, derivation paths, and display logic.
 #[derive(Debug, Clone)]
 pub struct VitalMeta {
     pub id: String,
@@ -73,6 +80,7 @@ pub struct VitalMeta {
 
 // --- THE REGISTRY ---
 
+/// Retrieves the static configuration and metadata for a given vital sign ID.
 pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {   
     match vital_id {
 

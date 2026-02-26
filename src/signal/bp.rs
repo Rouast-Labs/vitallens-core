@@ -5,7 +5,17 @@ pub struct BpResult {
     pub dbp: f32,
 }
 
-/// Helper to avoid code duplication between SBP and DBP extraction
+/// Internal helper to avoid code duplication between SBP and DBP extraction.
+/// Detects peaks in the given waveform and calculates the average amplitude.
+///
+/// # Arguments
+/// * `signal` - The blood pressure waveform data.
+/// * `fs` - Sampling frequency in Hz.
+/// * `confidence` - Array of confidence scores corresponding to the signal.
+/// * `invert` - If true, inverts the signal to find valleys (diastolic) instead of peaks (systolic).
+///
+/// # Returns
+/// A tuple of `(average_pressure, average_confidence)`.
 fn extract_pressure_internal(signal: &[f32], fs: f32, confidence: &[f32], invert: bool) -> (f32, f32) {
     let input = if invert {
         signal.iter().map(|&x| -x).collect::<Vec<f32>>()
@@ -36,14 +46,41 @@ fn extract_pressure_internal(signal: &[f32], fs: f32, confidence: &[f32], invert
     if count == 0 { (0.0, 0.0) } else { (val_sum / count as f32, conf_sum / count as f32) }
 }
 
+/// Extracts the average Systolic Blood Pressure (SBP) from an ABP waveform.
+///
+/// # Arguments
+/// * `signal` - The arterial blood pressure waveform data.
+/// * `fs` - Sampling frequency in Hz.
+/// * `confidence` - Array of confidence scores corresponding to the signal.
+///
+/// # Returns
+/// A tuple of `(systolic_pressure, confidence_score)`.
 pub fn extract_systolic_pressure(signal: &[f32], fs: f32, confidence: &[f32]) -> (f32, f32) {
     extract_pressure_internal(signal, fs, confidence, false)
 }
 
+/// Extracts the average Diastolic Blood Pressure (DBP) from an ABP waveform.
+///
+/// # Arguments
+/// * `signal` - The arterial blood pressure waveform data.
+/// * `fs` - Sampling frequency in Hz.
+/// * `confidence` - Array of confidence scores corresponding to the signal.
+///
+/// # Returns
+/// A tuple of `(diastolic_pressure, confidence_score)`.
 pub fn extract_diastolic_pressure(signal: &[f32], fs: f32, confidence: &[f32]) -> (f32, f32) {
     extract_pressure_internal(signal, fs, confidence, true)
 }
 
+/// Extracts the Pulse Pressure (PP) directly from an ABP waveform by finding both SBP and DBP.
+///
+/// # Arguments
+/// * `signal` - The arterial blood pressure waveform data.
+/// * `fs` - Sampling frequency in Hz.
+/// * `confidence` - Array of confidence scores corresponding to the signal.
+///
+/// # Returns
+/// A tuple of `(pulse_pressure, confidence_score)`.
 pub fn extract_pulse_pressure(signal: &[f32], fs: f32, confidence: &[f32]) -> (f32, f32) {
     let (sbp, c_sys) = extract_systolic_pressure(signal, fs, confidence);
     let (dbp, c_dia) = extract_diastolic_pressure(signal, fs, confidence);
@@ -55,6 +92,14 @@ pub fn extract_pulse_pressure(signal: &[f32], fs: f32, confidence: &[f32]) -> (f
     }
 }
 
+/// Calculates Mean Arterial Pressure (MAP) from pre-calculated scalar SBP and DBP arrays.
+///
+/// # Arguments
+/// * `sbp` - Slice of systolic blood pressure values.
+/// * `dbp` - Slice of diastolic blood pressure values.
+///
+/// # Returns
+/// A tuple of `(mean_arterial_pressure, confidence_score)`.
 pub fn calculate_map_from_signals(sbp: &[f32], dbp: &[f32]) -> (f32, f32) {
     let len = sbp.len().min(dbp.len());
     if len == 0 { return (0.0, 0.0); }
@@ -69,6 +114,14 @@ pub fn calculate_map_from_signals(sbp: &[f32], dbp: &[f32]) -> (f32, f32) {
     (sum_map / len as f32, 1.0) 
 }
 
+/// Calculates Pulse Pressure (PP) from pre-calculated scalar SBP and DBP arrays.
+///
+/// # Arguments
+/// * `sbp` - Slice of systolic blood pressure values.
+/// * `dbp` - Slice of diastolic blood pressure values.
+///
+/// # Returns
+/// A tuple of `(pulse_pressure, confidence_score)`.
 pub fn calculate_pp_from_signals(sbp: &[f32], dbp: &[f32]) -> (f32, f32) {
     let len = sbp.len().min(dbp.len());
     if len == 0 { return (0.0, 0.0); }

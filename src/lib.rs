@@ -1,5 +1,3 @@
-#![allow(non_local_definitions)]
-
 pub mod registry;
 pub mod signal;
 pub mod state;

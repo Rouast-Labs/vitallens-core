@@ -5,10 +5,7 @@ import matplotlib.pyplot as plt
 import neurokit2 as nk
 import vitallens_core
 
-# --- CONFIGURATION ---
 VIRTUAL_FS = 1000.0 
-
-# Rust Parity Constants
 MIN_RR_MS = 300.0
 MAX_RR_MS = 2000.0
 MAX_REL_CHANGE = 0.25
@@ -24,10 +21,7 @@ MIN_DURATION_THRESHOLDS = {
     "stress_index": 55.0
 }
 
-# --- PARITY FUNCTIONS ---
-
 def refine_location_rust_parity(signal, idx):
-    """Direct port of vitallens-core/src/signal/peaks.rs -> refine_location."""
     idx_int = int(round(idx))
     if 0 < idx_int < len(signal) - 1:
         y_l = signal[idx_int - 1]
@@ -41,10 +35,6 @@ def refine_location_rust_parity(signal, idx):
     return float(idx_int)
 
 def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_threshold):
-    """
-    Replicates extract_nn_intervals from vitallens-core/src/signal/hrv.rs
-    Iterates PAIRS of peaks. Only accepts interval if BOTH peaks are confident.
-    """
     intervals = []
     used_confs = []
     
@@ -74,13 +64,9 @@ def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_thre
     return intervals, min_conf_peaks
 
 def filter_outliers_rust_parity(intervals_ms):
-    """
-    Replicates the MEDIAN-SEEDED logic from vitallens-core/src/signal/hrv.rs
-    """
     intervals_ms = [float(x) for x in intervals_ms]
     if len(intervals_ms) < 2: return list(intervals_ms)
 
-    # 1. Pre-filter range & Calculate Median
     valid_range = [x for x in intervals_ms if MIN_RR_MS <= x <= MAX_RR_MS]
     if not valid_range: return []
 
@@ -91,7 +77,6 @@ def filter_outliers_rust_parity(intervals_ms):
     filtered = []
     last_accepted = median 
 
-    # 2. Sequential check
     for curr in intervals_ms:
         if curr < MIN_RR_MS or curr > MAX_RR_MS: continue
         
@@ -106,19 +91,14 @@ def filter_outliers_rust_parity(intervals_ms):
 def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_threshold, label):
     if len(peaks_indices_float) < 2: return {}
 
-    # 1. Interval Extraction (Parity)
-    raw_intervals_ms, min_conf_peaks = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)
-    
-    # 2. Filter (Median-Seeded Parity)
+    raw_intervals_ms, min_conf_peaks = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)    
     clean_rri_ms = filter_outliers_rust_parity(raw_intervals_ms)
     
     if len(clean_rri_ms) < 2: return {}, 0.0
 
-    # 3. Reconstruct Timeline for NeuroKit
     clean_peaks_ms = np.cumsum([0] + clean_rri_ms)
     metrics = {}
     
-    # --- Time Domain ---
     try:
         td = nk.hrv_time(clean_peaks_ms, sampling_rate=VIRTUAL_FS)
         metrics['hrv_sdnn'] = td['HRV_SDNN'].values[0]
@@ -126,8 +106,6 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
         if 'HRV_pNN50' in td: metrics['hrv_pnn50'] = td['HRV_pNN50'].values[0]
     except: pass
 
-    # --- Frequency Domain ---
-    # UPDATED: Enforce Linear Interpolation and FFT Periodogram to match Rust
     try:
         fd = nk.hrv_frequency(
             clean_peaks_ms, 
@@ -140,7 +118,6 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
     except Exception as e:
         print(f"[{label}] LF/HF Error: {e}")
         
-    # --- Non-Linear ---
     try:
         nl = nk.hrv_nonlinear(clean_peaks_ms, sampling_rate=VIRTUAL_FS)
         if 'HRV_SI' in nl: metrics['stress_index'] = nl['HRV_SI'].values[0]
@@ -163,7 +140,6 @@ class PeakAnnotator:
         
         print(f"[{title}] Auto-detecting peaks (Rust Parity)...")
         
-        # No confidence arguments passed here, per your current version
         detected_peaks = vitallens_core.find_peaks(
             signal=self.raw_signal.astype(np.float32), 
             fs=float(fs), 
@@ -179,7 +155,6 @@ class PeakAnnotator:
         
         print(f"[{title}] Found {len(self.peaks)} raw peaks.")
 
-        # Plot
         self.fig, self.ax = plt.subplots(figsize=(12, 6))
         self.t = np.arange(len(self.raw_signal))
         self.ax.plot(self.t, self.raw_signal, color='#444444', alpha=0.8, label='Signal')
@@ -206,12 +181,12 @@ class PeakAnnotator:
     def on_click(self, event):
         if event.inaxes != self.ax: return
         click_idx = event.xdata
-        if event.button == 3: # Delete
+        if event.button == 3:
             if not self.peaks: return
             dists = [abs(p - click_idx) for p in self.peaks]
             if min(dists) < 10: del self.peaks[dists.index(min(dists))]
             self.update_plot()
-        elif event.button == 1: # Add
+        elif event.button == 1:
             start = int(max(0, click_idx - 10))
             end = int(min(len(self.raw_signal), click_idx + 10))
             window = self.raw_signal[start:end]
@@ -248,12 +223,10 @@ def main():
     duration_sec = n_samples / fs if fs > 0 else 0
     print(f" -> Duration: {duration_sec:.2f}s (FPS: {fs}Hz)")
 
-    # 3. Process PPG
     if "ppg_waveform" in vitals:
         wave = vitals["ppg_waveform"]
         conf_arr = wave.get("confidence")
         
-        # PPG Settings
         CONF_THRESH = 0.5
         
         annotator = PeakAnnotator(
@@ -266,7 +239,6 @@ def main():
         peaks_float = annotator.peaks
         wave["peak_indices"] = [int(round(p)) for p in peaks_float]
         
-        # Use full confidence array for gating inside metric calc
         confidence_data = np.array(conf_arr, dtype=np.float32) if conf_arr else np.ones(len(wave["data"]))
         
         nk_metrics, nk_conf = calculate_neurokit_metrics(
@@ -288,7 +260,6 @@ def main():
                 vitals[key]["note"] = "Ground Truth (NeuroKit2 Verified)"
                 print(f"    [WRITE] {key}: {vitals[key]['value']} (conf: {vitals[key]['confidence']})")
 
-    # 4. Process Resp
     if "respiratory_waveform" in vitals:
         wave = vitals["respiratory_waveform"]
         conf_arr = wave.get("confidence")
@@ -307,7 +278,6 @@ def main():
         else:
             if key in vitals: vitals[key]["note"] = "Legacy Verified (FFT-based)"
 
-    # 5. Save
     with open(args.file, 'w') as f: json.dump(data, f, indent=4)
     print(f"Successfully updated {args.file}")
 

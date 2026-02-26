@@ -1,5 +1,6 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 
+/// Reusable scratchpad for FFT calculations to minimize memory allocations across continuous frames.
 #[derive(Debug, Default, Clone)]
 pub struct FftScratch {
     pub windowed: Vec<f32>,
@@ -14,11 +15,20 @@ impl FftScratch {
     }
 }
 
+/// Holds the resulting power spectral density from an FFT operation.
 pub struct PsdResult {
     pub frequencies: Vec<f32>,
     pub power: Vec<f32>,
 }
 
+/// Computes the Power Spectral Density (PSD) of a signal using a periodogram.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `fs` - The sampling frequency in Hz.
+/// * `target_res_hz` - The target frequency resolution in Hz (used to determine zero-padding).
+/// * `scratch` - A mutable reference to an `FftScratch` buffer to avoid reallocations.
+/// * `apply_window` - If true, applies a Hann window to the signal before FFT to reduce spectral leakage.
 pub fn compute_periodogram(
     signal: &[f32], 
     fs: f32, 
@@ -73,6 +83,19 @@ pub fn compute_periodogram(
     }
 }
 
+/// Estimates the dominant rate (in BPM) within a specific range using a periodogram.
+/// Refines the peak location using quadratic interpolation for sub-bin precision.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `fs` - The sampling frequency in Hz.
+/// * `min_bpm` - The minimum allowed rate in Beats Per Minute.
+/// * `max_bpm` - The maximum allowed rate in Beats Per Minute.
+/// * `target_res_hz` - The target frequency resolution for the FFT.
+/// * `scratch_opt` - An optional mutable reference to an `FftScratch` buffer.
+///
+/// # Returns
+/// A tuple of `(rate_in_bpm, confidence_score)`.
 pub fn estimate_rate_periodogram(
     signal: &[f32],
     fs: f32,
@@ -175,7 +198,7 @@ mod tests {
             let mut seed: u64 = 12345;
             for x in self.data.iter_mut() {
                 seed = (1103515245 * seed + 12345) % 2147483648;
-                let noise = (seed as f32 / 2147483648.0) * 2.0 - 1.0;  
+                let noise = (seed as f32 / 2147483648.0) * 2.0 - 1.0;
                 *x += noise * amplitude;
             }
             self
@@ -212,7 +235,7 @@ mod tests {
     #[test]
     fn test_high_heart_rate() {
         let fs = 30.0;
-        let target_bpm = 180.0;  
+        let target_bpm = 180.0;
         let signal = SignalBuilder::new(5.0, fs)
             .add_sine(target_bpm / 60.0, 1.0)
             .get();
@@ -224,7 +247,7 @@ mod tests {
     #[test]
     fn test_low_heart_rate() {
         let fs = 30.0;
-        let target_bpm = 45.0;  
+        let target_bpm = 45.0;
         let signal = SignalBuilder::new(10.0, fs)
             .add_sine(target_bpm / 60.0, 1.0)
             .get();
@@ -239,7 +262,7 @@ mod tests {
         let target_bpm = 60.0;
         let signal = SignalBuilder::new(10.0, fs)
             .add_sine(1.0, 0.5) 
-            .add_offset(1000.0)  
+            .add_offset(1000.0)
             .get();
 
         let (bpm, conf) = estimate_rate_periodogram(&signal, fs, 40.0, 200.0, 0.005, None);
@@ -322,13 +345,12 @@ mod tests {
     #[test]
     fn test_psd_frequency_resolution() {
         let fs = 30.0;
-        let target_res = 0.1;  
+        let target_res = 0.1;
         let signal = vec![0.0; 100];
         
         let mut scratch = FftScratch::new();
         compute_periodogram(&signal, fs, target_res, &mut scratch, true);
         
-        // Read from scratch
         let actual_res = scratch.frequencies[1] - scratch.frequencies[0];
         assert!(actual_res <= target_res);
         assert_eq!(scratch.frequencies.len(), scratch.power.len());
@@ -337,7 +359,7 @@ mod tests {
     #[test]
     fn test_psd_peak_location() {
         let fs = 20.0;
-        let target_hz = 2.0;  
+        let target_hz = 2.0;
         let signal = SignalBuilder::new(5.0, fs)
             .add_sine(target_hz, 1.0)
             .get();
@@ -359,7 +381,7 @@ mod tests {
     fn test_psd_energy_scaling() {
         let fs = 10.0;
         let sig1 = SignalBuilder::new(5.0, fs).add_sine(1.0, 1.0).get();
-        let sig2 = SignalBuilder::new(5.0, fs).add_sine(1.0, 2.0).get();  
+        let sig2 = SignalBuilder::new(5.0, fs).add_sine(1.0, 2.0).get();
         
         let mut scratch = FftScratch::new();
         
@@ -378,7 +400,7 @@ mod tests {
         let fs = 10.0;
         let signal = SignalBuilder::new(5.0, fs)
             .add_sine(1.0, 1.0)
-            .add_offset(100.0)  
+            .add_offset(100.0)
             .get();
             
         let mut scratch = FftScratch::new();
