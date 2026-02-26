@@ -1,98 +1,51 @@
-# VitalLens Core
+<div align="center">
+  <h1>vitallens-core</h1>
+  <p align="center">
+    <p>The universal Rust engine powering the VitalLens ecosystem.</p>
+  </p>
 
-**Status:** Implementation
-**Goal:** A "Universal Core" for rPPG signal processing ensuring mathematical parity across Python (Backend), iOS (Mobile), and Web (JS/Wasm).
+[![Tests](https://github.com/Rouast-Labs/vitallens-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Rouast-Labs/vitallens-core/actions/workflows/ci.yml)
+[![Website](https://img.shields.io/badge/Website-rouast.com/api-blue.svg)](https://www.rouast.com/api/)
+[![Documentation](https://img.shields.io/badge/Docs-docs.rouast.com-blue.svg)](https://docs.rouast.com/)
 
-## Library Purpose
+</div>
 
-This library is a single Rust codebase that compiles into three targets:
+`vitallens-core` is the shared signal processing library for [**VitalLens**](https://www.rouast.com/api/). It provides a single Rust codebase that guarantees mathematical parity and high performance across all our client platforms. 
 
-1.  **Python (`.so`):** Replaces `prpy` math. Built via `maturin`.
-2.  **macOS (`.a` / `.swift`):** Replaces `SignalOps.swift`. Built via `cargo` + `uniffi`.
-3.  **Web (`.wasm`):** Replaces `physio.ts`. Built via `wasm-pack`.
+## Targets
 
-## Directory Structure
+This core compiles directly into the native formats required by our clients:
 
-```text
-vitallens-core/
-├── src/
-│   ├── lib.rs                 # Entry point (Feature-gated modules)
-│   ├── signal/                # Pure Math (DSP, FFT, Peak Detection)
-│   ├── state/                 # Stateful Logic (Buffers, Analyzer)
-│   └── bindings/              # Language Glue
-│       ├── python.rs          # PyO3 Bindings
-│       └── swift/             # Generated Swift code (Output)
-├── Cargo.toml                 # Master config
-├── Makefile                   # Universal build runner
-├── pyproject.toml             # Python build config
-└── uniffi.toml                # Mobile binding config
-```
+1. **Apple (iOS/macOS):** Compiled as an `.xcframework` with Swift bindings via UniFFI.
+2. **Web (JavaScript/TypeScript):** Compiled to WebAssembly (`.wasm`) via `wasm-pack`.
+3. **Python:** Compiled as a native Python extension (`.so`) via PyO3 and Maturin.
 
-## Build Instructions
+## Integration Guides
 
-**Quick Start:**
+If you are looking to integrate this core into a specific environment, refer to the dedicated guides:
 
-Run the universal makefile to test all targets:
+- [🍎 iOS / Swift Implementation Guide](docs/ios.md)
+- [🕸️ Web / JS Implementation Guide](docs/js.md)
+- [🐍 Python Implementation Guide](docs/python.md)
 
-```bash
-make
-```
+## Development
 
-### 1. Python (Local Development)
+Prerequisites include Rust, Python 3.10+, `wasm-pack`, and the necessary Apple targets. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup instructions.
 
-Builds the Rust core as a Python extension and installs it into your current environment.
+We use a universal `Makefile` to handle building and testing.
 
 ```bash
-make build-python
-# Or alternatively
-maturin develop --features python
+# Run all fast verifications and unit tests
+make check
+
+# Build release artifacts for all targets
+make build
 ```
 
-### 2. Apple
+## Disclaimer
 
-**Step A: Build Libraries**
+The estimates provided by this software are for general wellness purposes only and are not intended for medical use. Always consult with a doctor for any health concerns or for medically precise measurements.
 
-Build the static library for both Simulator (x86_64) and Device (arm64).
+## License
 
-```bash
-make build-apple
-```
-
-Or run specific builds:
-
-```
-# For Simulator (Intel Mac)
-cargo build --release --target x86_64-apple-ios --lib
-
-# For Simulator (Apple Silicon)
-cargo build --release --target aarch64-apple-ios-sim --lib
-
-# For Device (iPhone)
-cargo build --release --target aarch64-apple-ios --lib
-```
-
-**Step B: Generate Swift Bindings**
-
-```bash
-# Generates bindings/swift/VitallensCore.swift
-cargo run --features=uniffi/cli --bin uniffi-bindgen generate \
-    --library target/x86_64-apple-ios/release/libvitallens_core.dylib \
-    --language swift \
-    --out-dir bindings/swift
-```
-
-### 3. Web (Wasm)
-
-Compiles to WebAssembly for use in the browser.
-
-```bash
-make check-web
-# Or alternatively
-wasm-pack build --target web --no-default-features
-```
-
-## Architecture Notes
-
-- **Stateless Signal Processing:** `src/signal/` contains pure functions (input -> output) with no side effects.
-- **State Management:** `src/state/` handles buffering, windowing, and history.
-- **Polyglot Strategy:** We use `#[cfg(feature = "python")]` and `#[cfg(not(target_arch = "wasm32"))]` to prevent platform-specific code (like `libc` or `Python.h`) from breaking builds on other targets.
+This project is licensed under the [MIT License](https://www.google.com/search?q=LICENSE).
