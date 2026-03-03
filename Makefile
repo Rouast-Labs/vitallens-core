@@ -101,6 +101,11 @@ dist-apple: build-apple
 	@sed -i '' 's|checksum: ".*"|checksum: "$(CHECKSUM)"|' Package.swift
 	@echo "✅ Package.swift updated."
 
+dist-web: build-web
+	@echo "📦 Publishing WebAssembly to npm..."
+	cd pkg && npm publish && cd ..
+	@echo "✅ Published to npm."
+
 clean:
 	cargo clean
 	rm -rf target/

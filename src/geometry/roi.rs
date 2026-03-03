@@ -181,6 +181,26 @@ pub fn is_contained(inner: Rect, outer: Rect, min_overlap_pct: f32) -> bool {
     visible_w >= required_w && visible_h >= required_h
 }
 
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = calculateRoi)]
+pub fn calculate_roi_js(
+    face_val: JsValue,
+    method_val: JsValue,
+    detector_val: JsValue,
+    container_w: Option<f32>,
+    container_h: Option<f32>,
+    force_even: bool
+) -> Result<JsValue, JsError> {
+    let face: crate::types::Rect = serde_wasm_bindgen::from_value(face_val)?;
+    let method: crate::types::RoiMethod = serde_wasm_bindgen::from_value(method_val)?;
+    let detector: crate::types::FaceDetector = serde_wasm_bindgen::from_value(detector_val)?;
+    let result = calculate_roi(face, method, detector, container_w, container_h, force_even);
+    Ok(serde_wasm_bindgen::to_value(&result)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

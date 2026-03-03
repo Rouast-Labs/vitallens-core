@@ -83,7 +83,7 @@ Running `make build-web` compiles the Wasm binary and generates JS/TS glue code 
 To publish a new version (e.g., to update the Swift Package):
 
 1. **Bump Version:** Update the `version` string in `Cargo.toml`.
-2. **Prepare Distribution:** Run `make dist-apple`. This zips the framework and automatically updates `Package.swift` with the new checksum and download URL.
+2. **Prepare Apple Distribution:** Run `make dist-apple`. This zips the framework and automatically updates `Package.swift` with the new checksum and download URL.
 3. **Commit & Tag:**
     ```bash
     git add .
@@ -91,4 +91,11 @@ To publish a new version (e.g., to update the Swift Package):
     git tag x.y.z
     git push origin main --tags
     ```
-4. **GitHub Release:** Create a new release on GitHub matching the tag and upload `target/VitalLensCoreFFI.xcframework.zip`.
+4. **Publish to npm:**
+    ```bash
+    make dist-web
+    ```
+5. **Create GitHub Release (requires GitHub CLI):**
+    ```bash
+    gh release create x.y.z target/VitalLensCoreFFI.xcframework.zip --title "Release x.y.z" --generate-notes
+    ```

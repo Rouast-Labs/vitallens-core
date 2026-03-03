@@ -42,6 +42,7 @@ pub fn compute_buffer_config(config: SessionConfig) -> BufferConfig {
 /// Manages the tracking, matching, and lifecycle of video frame buffers across a session.
 #[derive(Debug)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct BufferPlanner {
     config: BufferConfig,
     iou_threshold: f32,
@@ -187,6 +188,43 @@ impl BufferPlanner {
             InferenceMode::File => count >= self.config.file_max,
         }
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl BufferPlanner {
+    #[wasm_bindgen(constructor)]
+    pub fn new_js(config_val: JsValue) -> Result<BufferPlanner, JsError> {
+        let config: crate::types::BufferConfig = serde_wasm_bindgen::from_value(config_val)?;
+        Ok(Self::new(config))
+    }
+
+    #[wasm_bindgen(js_name = evaluateTarget)]
+    pub fn evaluate_target_js(&self, target_roi_val: JsValue, timestamp: f64, active_buffers_val: JsValue) -> Result<JsValue, JsError> {
+        let target_roi = serde_wasm_bindgen::from_value(target_roi_val)?;
+        let active_buffers = serde_wasm_bindgen::from_value(active_buffers_val)?;
+        let action = self.evaluate_target(target_roi, timestamp, active_buffers);
+        Ok(serde_wasm_bindgen::to_value(&action)?)
+    }
+
+    #[wasm_bindgen(js_name = poll)]
+    pub fn poll_js(&self, active_buffers_val: JsValue, current_time: f64, mode_val: JsValue, has_state: bool, flush: bool) -> Result<JsValue, JsError> {
+        let active_buffers = serde_wasm_bindgen::from_value(active_buffers_val)?;
+        let mode = serde_wasm_bindgen::from_value(mode_val)?;
+        let plan = self.poll(active_buffers, current_time, mode, has_state, flush);
+        Ok(serde_wasm_bindgen::to_value(&plan)?)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = computeBufferConfig)]
+pub fn compute_buffer_config_js(config_val: JsValue) -> Result<JsValue, JsError> {
+    let config: crate::types::SessionConfig = serde_wasm_bindgen::from_value(config_val)?;
+    let buffer_config = compute_buffer_config(config);
+    Ok(serde_wasm_bindgen::to_value(&buffer_config)?)
 }
 
 #[cfg(test)]
