@@ -134,7 +134,7 @@ _commit_version: dist-apple
 	@VERSION=$$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2); \
 	git add Cargo.toml Cargo.lock bindings/swift/VitalLensCore.swift Package.swift; \
 	git commit -S -m "v$$VERSION"; \
-	git tag v$$VERSION; \
+	git tag -a v$$VERSION -m "Release v$$VERSION"; \
 	echo "\n✅ Version bumped to v$$VERSION, framework packaged, and commit/tag created."; \
 	echo "🚀 Next steps:"; \
 	echo "   1. git push origin main --follow-tags"; \

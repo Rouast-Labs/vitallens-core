@@ -9,6 +9,8 @@ features = ["python"]
 name = "vitallens_core"
 dynamic = ["version"]
 requires-python = ">=3.10"
+readme = "README.md"
+description = "Core signal processing library for VitalLens"
 classifiers = [
     "Programming Language :: Rust",
 ]
