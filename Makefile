@@ -1,4 +1,4 @@
-.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web dist-apple clean
+.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web dist-apple dist-web dist-python version-patch version-minor version-major _commit_version clean
 
 default: check
 
@@ -93,11 +93,11 @@ build-web:
 
 dist-apple: build-apple
 	@echo "📦 Zipping XCFramework..."
-	@cd target && zip -yr VitalLensCoreFFI.xcframework.zip VitalLensCoreFFI.xcframework
+	@cd target && rm -f VitalLensCoreFFI.xcframework.zip && zip -yr VitalLensCoreFFI.xcframework.zip VitalLensCoreFFI.xcframework
 	$(eval CHECKSUM=$(shell swift package compute-checksum target/VitalLensCoreFFI.xcframework.zip))
-	$(eval VERSION=$(shell grep '^version =' Cargo.toml | cut -d '"' -f 2))
-	@echo "📝 Updating Package.swift: Version $(VERSION), Checksum $(CHECKSUM)"
-	@sed -i '' 's|url: ".*releases/download/.*/VitalLensCoreFFI.xcframework.zip"|url: "https://github.com/Rouast-Labs/vitallens-core/releases/download/$(VERSION)/VitalLensCoreFFI.xcframework.zip"|' Package.swift
+	$(eval VERSION=$(shell grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2))
+	@echo "📝 Updating Package.swift: Version v$(VERSION), Checksum $(CHECKSUM)"
+	@sed -i '' 's|url: ".*releases/download/.*/VitalLensCoreFFI.xcframework.zip"|url: "https://github.com/Rouast-Labs/vitallens-core/releases/download/v$(VERSION)/VitalLensCoreFFI.xcframework.zip"|' Package.swift
 	@sed -i '' 's|checksum: ".*"|checksum: "$(CHECKSUM)"|' Package.swift
 	@echo "✅ Package.swift updated."
 
@@ -105,6 +105,44 @@ dist-web: build-web
 	@echo "📦 Publishing WebAssembly to npm..."
 	cd pkg && npm publish && cd ..
 	@echo "✅ Published to npm."
+
+dist-python: build-python
+	@echo "🐍 Publishing Python Wheel to PyPI..."
+	maturin publish --release --features python
+	@echo "✅ Published to PyPI."
+
+# ==========================================
+# VERSIONING WORKFLOW
+# ==========================================
+
+version-patch:
+	@cargo install cargo-edit > /dev/null 2>&1 || true
+	@cargo set-version --bump patch
+	@$(MAKE) _commit_version
+
+version-minor:
+	@cargo install cargo-edit > /dev/null 2>&1 || true
+	@cargo set-version --bump minor
+	@$(MAKE) _commit_version
+
+version-major:
+	@cargo install cargo-edit > /dev/null 2>&1 || true
+	@cargo set-version --bump major
+	@$(MAKE) _commit_version
+
+_commit_version: dist-apple
+	$(eval VERSION=$(shell grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2))
+	@git add Cargo.toml bindings/swift/VitalLensCore.swift Package.swift
+	@git commit -S -m "v$(VERSION)"
+	@git tag v$(VERSION)
+	@echo "\n✅ Version bumped to v$(VERSION), framework packaged, and commit/tag created."
+	@echo "🚀 Next steps:"
+	@echo "   1. git push origin main --follow-tags"
+	@echo "   2. gh release create v$(VERSION) target/VitalLensCoreFFI.xcframework.zip --generate-notes"
+
+# ==========================================
+# CLEANUP
+# ==========================================
 
 clean:
 	cargo clean

@@ -80,22 +80,31 @@ Running `make build-web` compiles the Wasm binary and generates JS/TS glue code 
 
 ## Release Workflow
 
-To publish a new version (e.g., to update the Swift Package):
+We use GitHub Actions to automate publishing to npm and PyPI. The Apple XCFramework must be built and attached locally to ensure SPM checksums match the git tag.
 
-1. **Bump Version:** Update the `version` string in `Cargo.toml`.
-2. **Prepare Apple Distribution:** Run `make dist-apple`. This zips the framework and automatically updates `Package.swift` with the new checksum and download URL.
-3. **Commit & Tag:**
-    ```bash
-    git add .
-    git commit -m "Release x.y.z"
-    git tag x.y.z
-    git push origin main --tags
-    ```
-4. **Publish to npm:**
-    ```bash
-    make dist-web
-    ```
-5. **Create GitHub Release (requires GitHub CLI):**
-    ```bash
-    gh release create x.y.z target/VitalLensCoreFFI.xcframework.zip --title "Release x.y.z" --generate-notes
-    ```
+1. **Pull Latest:** Ensure your local `main` branch is up to date.
+
+```bash
+git checkout main
+git pull origin main
+```
+
+2. **Bump & Build:** Run the appropriate version command. This automatically bumps `Cargo.toml`, builds the Apple framework, updates `Package.swift`, commits the changes, and tags the release.
+
+```bash
+make version-patch # or version-minor, version-major
+```
+
+3. **Push:** Push the version commit and the new tag.
+
+```bash
+git push origin main --follow-tags
+```
+
+4. **Publish Release:** Create the GitHub release and upload the local XCFramework zip. (The `make` command will output the exact command for you to copy-paste).
+
+```bash
+gh release create vX.Y.Z target/VitalLensCoreFFI.xcframework.zip --generate-notes
+```
+
+Once the release is published, CI will automatically build and publish the cross-platform Python wheels to PyPI and the WebAssembly package to npm.

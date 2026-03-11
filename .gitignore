@@ -28,9 +28,7 @@ pkg/
 # Mac
 .DS_Store
 
-# Ignore everything in bindings
-/bindings/*
-
-# Allow the specific file path directly
-!/bindings/swift/
-!/bindings/swift/VitalLensCore.swift
+# Bindings
+/bindings/headers/
+/bindings/swift/VitalLensCoreFFI.h
+/bindings/swift/VitalLensCoreFFI.modulemap
