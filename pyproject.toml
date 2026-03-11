@@ -6,7 +6,7 @@ build-backend = "maturin"
 features = ["python"]
 
 [project]
-name = "vitallens_core"
+name = "vitallens-core"
 dynamic = ["version"]
 requires-python = ">=3.10"
 readme = "README.md"
