@@ -4,6 +4,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 features = ["python"]
+module-name = "vitallens_core"
 
 [project]
 name = "vitallens-core"
