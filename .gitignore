@@ -32,3 +32,4 @@ pkg/
 /bindings/headers/
 /bindings/swift/VitalLensCoreFFI.h
 /bindings/swift/VitalLensCoreFFI.modulemap
+dist/
