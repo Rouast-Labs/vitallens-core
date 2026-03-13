@@ -16,6 +16,9 @@ pub struct SessionConfig {
     pub input_size: u64,
     pub n_inputs: u64,
     pub roi_method: String,
+    #[serde(default)]
+    #[cfg_attr(not(target_arch = "wasm32"), uniffi(default = None))]
+    pub estimate_rolling_vitals: Option<bool>,
 }
 
 /// A generic wrapper for a single physical signal and its corresponding confidence array.
@@ -298,6 +301,8 @@ pub struct SessionResult {
     pub face: Option<FaceResult>,
     pub waveforms: HashMap<String, WaveformResult>,
     pub vitals: HashMap<String, VitalResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rolling_vitals: Option<HashMap<String, WaveformResult>>,
     pub fps: f32,
     pub message: String,
 }
@@ -321,7 +326,7 @@ pub struct VitalDisplayMeta {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (model_name, supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None))]
+    #[pyo3(signature = (model_name, supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None, estimate_rolling_vitals=None))]
     fn new(
         model_name: String,
         supported_vitals: Vec<String>, 
@@ -329,9 +334,14 @@ impl SessionConfig {
         input_size: u64, 
         n_inputs: u64, 
         roi_method: String,
-        return_waveforms: Option<Vec<String>>
+        return_waveforms: Option<Vec<String>>,
+        estimate_rolling_vitals: Option<bool>
     ) -> Self {
-        Self { model_name, supported_vitals, return_waveforms, fps_target, input_size, n_inputs, roi_method }
+        Self {
+            model_name, supported_vitals, return_waveforms,
+            fps_target, input_size, n_inputs, roi_method,
+            estimate_rolling_vitals
+        }
     }
 }
 

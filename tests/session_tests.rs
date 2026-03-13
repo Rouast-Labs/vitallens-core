@@ -128,13 +128,36 @@ fn test_session(resource: &str) {
     let active_vitals: Vec<&String> = cases.iter().map(|c| &c.vital_id).collect();
     println!(" -> Active Vitals: {:?}", active_vitals);
 
-    let (global_results, global_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Global);
-    let (inc_results, inc_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Incremental);
-    let (win_results, win_waves) = run_session_extraction(&ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
+    let max_len = cases.iter().map(|c| c.input_data.len()).max().unwrap_or(0);
+
+    let (global_results, global_waves, global_rolling) = run_session_extraction(&ref_data, &cases, WaveformMode::Global);
+    let (inc_results, inc_waves, _) = run_session_extraction(&ref_data, &cases, WaveformMode::Incremental);
+    let (win_results, win_waves, _) = run_session_extraction(&ref_data, &cases, WaveformMode::Windowed { seconds: 30.0 });
 
     let mut failures = Vec::new();
 
     println!("\n --- ASSERTIONS [{}] ---", filename);
+
+    let rolling_map = global_rolling.expect("SessionResult.rolling_vitals should not be None in Global mode");
+
+    assert!(
+        rolling_map.contains_key("heart_rate"),
+        "Rolling vitals map missing 'heart_rate' key for {}", filename
+    );
+
+    let hr_rolling = &rolling_map["heart_rate"];
+    assert_eq!(
+        hr_rolling.data.len(),
+        max_len,
+        "Rolling HR waveform length {} does not match session length {}", hr_rolling.data.len(), max_len
+    );
+
+    assert!(
+        hr_rolling.data.iter().any(|v| !v.is_nan()),
+        "Rolling HR for {} exists but contains no valid numeric values", filename
+    );
+
+    println!(" [OK] Rolling Heart Rate verified.");
 
     for case in &cases {
         let vid = &case.vital_id;
@@ -217,7 +240,11 @@ fn run_session_extraction(
     ref_data: &ReferenceData, 
     cases: &[TestCase], 
     mode: WaveformMode
-) -> (HashMap<String, (f32, f32)>, HashMap<String, (Vec<f32>, Vec<f32>)>) {
+) -> (
+    HashMap<String, (f32, f32)>,
+    HashMap<String, (Vec<f32>, Vec<f32>)>,
+    Option<HashMap<String, vitallens_core::types::WaveformResult>>
+) {
     
     let supported_vitals: Vec<String> = cases.iter().map(|c| c.vital_id.clone()).collect();
     let config = SessionConfig {
@@ -228,6 +255,7 @@ fn run_session_extraction(
         input_size: 30,
         n_inputs: 4,
         roi_method: "face".to_string(),
+        estimate_rolling_vitals: Some(true),
     };
     
     let session = Session::new(config);
@@ -247,6 +275,7 @@ fn run_session_extraction(
     
     let mut final_results: HashMap<String, (f32, f32)> = HashMap::new();
     let mut waveform_results: HashMap<String, (Vec<f32>, Vec<f32>)> = HashMap::new();
+    let mut rolling_results = None;
     let mut start = 0;
 
     println!(" -> Running Mode: {:?} (Chunk {}, Step {})", mode, window_size, step_size);
@@ -301,6 +330,10 @@ fn run_session_extraction(
         };
 
         let result = session.process(input, mode.clone());
+
+        if result.rolling_vitals.is_some() {
+            rolling_results = result.rolling_vitals;
+        }
 
         if ref_data.face.is_some() {
             if let Some(face_res) = &result.face {
@@ -360,5 +393,5 @@ fn run_session_extraction(
         start += step_size;
     }
 
-    (final_results, waveform_results)
+    (final_results, waveform_results, rolling_results)
 }

@@ -67,6 +67,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
             input_size: 30,
             n_inputs: 4,
             roi_method: "face".to_string(),
+            estimate_rolling_vitals: None,
         };
         
         let session = Session::new(config);

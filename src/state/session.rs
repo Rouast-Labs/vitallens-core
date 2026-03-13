@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use crate::types::{SessionInput, SessionConfig, SessionResult, WaveformMode, WaveformResult, VitalResult, FaceResult, FaceInput, SignalInput};
 use crate::state::series::SignalBuffer;
-use crate::registry::{self, VitalType, CalculationMethod, VitalMeta};
+use crate::registry::{self, VitalType, CalculationMethod, VitalMeta, DerivationConfig};
 use crate::signal::fft::FftScratch;
 use crate::signal::peaks::SignalBounds;
 
@@ -88,6 +88,7 @@ impl SessionCore {
                 face: None,
                 waveforms: HashMap::new(),
                 vitals: HashMap::new(),
+                rolling_vitals: None,
                 fps: self.config.fps_target,
                 message: msg,
             };
@@ -103,8 +104,9 @@ impl SessionCore {
         }
 
         let derived_results = self.perform_derivations(&mode);
+        let rolling_results = self.perform_rolling_derivations(&mode, &derived_results);
 
-        self.construct_output(mode, derived_results)
+        self.construct_output(mode, derived_results, rolling_results)
     }
 
     /// Merges new timestamps into the state, determining how many frames overlap with existing history.
@@ -183,6 +185,92 @@ impl SessionCore {
             }
             for buf in self.signal_confs.values_mut() {
                 buf.prune(self.max_history);
+            }
+        }
+    }
+
+    /// Evaluates a specific vital sign derivation logic over a provided data window.
+    ///
+    /// # Arguments
+    /// * `cfg` - The derivation configuration defining the method and bounds.
+    /// * `inputs` - A slice of input signal data slices.
+    /// * `confs` - A slice of confidence score slices corresponding to the inputs.
+    /// * `ts_slice` - The timestamp slice for the current window.
+    /// * `actual_fs` - The calculated sampling frequency for this window.
+    /// * `slice_avg_conf` - The average confidence score across the slice.
+    /// * `global_results` - A map of already computed global vitals for cross-referencing.
+    /// * `fft_scratch` - A mutable reference to an FFT scratchpad for memory reuse.
+    ///
+    /// # Returns
+    /// A tuple of `(calculated_value, confidence_score)`.
+    fn evaluate_derivation(
+        cfg: &DerivationConfig,
+        inputs: &[&[f32]],
+        confs: &[&[f32]],
+        ts_slice: &[f64],
+        actual_fs: f32,
+        slice_avg_conf: f32,
+        global_results: &HashMap<String, (f32, f32)>,
+        fft_scratch: &mut FftScratch,
+    ) -> (f32, f32) {
+        match &cfg.method {
+            CalculationMethod::Rate(strategy) => {
+                let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
+                let hint = global_results.get("heart_rate").map(|(v, _)| *v);
+                let res = crate::signal::rate::estimate_rate(
+                    inputs[0], actual_fs, bounds, strategy.clone(), hint, Some(fft_scratch)
+                );
+                (res.value, slice_avg_conf)
+            },
+            CalculationMethod::HrvFromPeaks(metric) => {
+                let rate_hint = global_results.get("heart_rate").map(|(v, _)| *v);
+                let bounds = if let Some(hr_meta) = registry::get_vital_meta("heart_rate") {
+                    let d = &hr_meta.derivations[0];
+                    SignalBounds { min_rate: d.min_value, max_rate: d.max_value }
+                } else {
+                    SignalBounds { min_rate: 40.0, max_rate: 220.0 }
+                };
+
+                crate::signal::hrv::estimate_hrv(
+                    inputs[0], actual_fs, metric.clone(), ts_slice, confs[0], bounds, rate_hint
+                )
+            },
+            CalculationMethod::Average => {
+                let (avg_val, _) = crate::signal::calculate_average(inputs[0]);
+                (avg_val, slice_avg_conf)
+            },
+            CalculationMethod::BpSystolic => {
+                crate::signal::bp::extract_systolic_pressure(inputs[0], actual_fs, confs[0])
+            },
+            CalculationMethod::BpDiastolic => {
+                crate::signal::bp::extract_diastolic_pressure(inputs[0], actual_fs, confs[0])
+            },
+            CalculationMethod::PulsePressureFromSignal => {
+                crate::signal::bp::extract_pulse_pressure(inputs[0], actual_fs, confs[0])
+            },
+            CalculationMethod::PulsePressureFromScalars => {
+                if inputs.len() >= 2 {
+                    crate::signal::bp::calculate_pp_from_signals(inputs[0], inputs[1])
+                } else {
+                    (0.0, 0.0)
+                }
+            },
+            CalculationMethod::MapFromScalars => {
+                if inputs.len() >= 2 {
+                    crate::signal::bp::calculate_map_from_signals(inputs[0], inputs[1])
+                } else {
+                    (0.0, 0.0)
+                }
+            },
+            CalculationMethod::IeRatio => {
+                let rate_hint = global_results.get("respiratory_rate").map(|(v, _)| *v);
+                let rr_meta = registry::get_vital_meta("respiratory_rate").unwrap();
+                let rr_deriv = &rr_meta.derivations[0];
+                let bounds = SignalBounds {
+                    min_rate: rr_deriv.min_value,
+                    max_rate: rr_deriv.max_value
+                };
+                crate::signal::resp::calculate_ie_ratio(inputs[0], actual_fs, confs[0], bounds, rate_hint)
             }
         }
     }
@@ -274,66 +362,9 @@ impl SessionCore {
                         confs[0].iter().sum::<f32>() / confs[0].len() as f32
                     } else { 0.0 };
 
-                    let (val, conf) = match &cfg.method {
-                        CalculationMethod::Rate(strategy) => {
-                            let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
-                            let hint = results.get("heart_rate").map(|(v, _)| *v);
-                            let res = crate::signal::rate::estimate_rate(
-                                inputs[0], actual_fs, bounds, *strategy, hint, Some(&mut self.fft_scratch)
-                            );
-                            (res.value, slice_avg_conf)
-                        },
-                        CalculationMethod::HrvFromPeaks(metric) => {
-                            let rate_hint = results.get("heart_rate").map(|(v, _)| *v);
-                            let bounds = if let Some(hr_meta) = registry::get_vital_meta("heart_rate") {
-                                let d = &hr_meta.derivations[0];
-                                SignalBounds { min_rate: d.min_value, max_rate: d.max_value }
-                            } else {
-                                SignalBounds { min_rate: 40.0, max_rate: 220.0 }
-                            };
-
-                            crate::signal::hrv::estimate_hrv(
-                                inputs[0], actual_fs, *metric, ts_slice, confs[0], bounds, rate_hint
-                            )
-                        },
-                        CalculationMethod::Average => {
-                            let (avg_val, _) = crate::signal::calculate_average(inputs[0]);
-                            (avg_val, slice_avg_conf)
-                        },
-                        CalculationMethod::BpSystolic => {
-                            crate::signal::bp::extract_systolic_pressure(inputs[0], actual_fs, confs[0])
-                        },
-                        CalculationMethod::BpDiastolic => {
-                            crate::signal::bp::extract_diastolic_pressure(inputs[0], actual_fs, confs[0])
-                        },
-                        CalculationMethod::PulsePressureFromSignal => {
-                            crate::signal::bp::extract_pulse_pressure(inputs[0], actual_fs, confs[0])
-                        },
-                        CalculationMethod::PulsePressureFromScalars => {
-                            if inputs.len() >= 2 {
-                                crate::signal::bp::calculate_pp_from_signals(inputs[0], inputs[1])
-                            } else {
-                                (0.0, 0.0)
-                            }
-                        },
-                        CalculationMethod::MapFromScalars => {
-                            if inputs.len() >= 2 {
-                                crate::signal::bp::calculate_map_from_signals(inputs[0], inputs[1])
-                            } else {
-                                (0.0, 0.0)
-                            }
-                        },
-                        CalculationMethod::IeRatio => {
-                            let rate_hint = results.get("respiratory_rate").map(|(v, _)| *v);
-                            let rr_meta = registry::get_vital_meta("respiratory_rate").unwrap();
-                            let rr_deriv = &rr_meta.derivations[0];
-                            let bounds = SignalBounds { 
-                                min_rate: rr_deriv.min_value, 
-                                max_rate: rr_deriv.max_value 
-                            };
-                            crate::signal::resp::calculate_ie_ratio(inputs[0], actual_fs, confs[0], bounds, rate_hint)
-                        }
-                    };
+                    let (val, conf) = SessionCore::evaluate_derivation(
+                        cfg, &inputs, &confs, ts_slice, actual_fs, slice_avg_conf, &results, &mut self.fft_scratch
+                    );
 
                     if val >= cfg.min_value && val <= cfg.max_value {
                         results.insert(vital_id.clone(), (val, conf));
@@ -345,15 +376,168 @@ impl SessionCore {
         results
     }
 
+    /// Computes vital signs using a sliding window across the entire session history.
+    ///
+    /// # Arguments
+    /// * `mode` - The extraction mode (only executed if Global).
+    /// * `global_results` - Pre-computed scalar vitals used as hints for detection.
+    ///
+    /// # Returns
+    /// An optional map of `WaveformResult` containing the interpolated rolling vitals.
+    fn perform_rolling_derivations(
+        &mut self,
+        mode: &WaveformMode,
+        global_results: &HashMap<String, (f32, f32)>
+    ) -> Option<HashMap<String, WaveformResult>> {
+
+        if !self.config.estimate_rolling_vitals.unwrap_or(false) || !matches!(mode, WaveformMode::Global) {
+            return None;
+        }
+
+        let mut results = HashMap::new();
+        let n_frames = self.timestamps.len();
+        if n_frames == 0 { return None; }
+
+        let vital_ids: Vec<String> = self.active_vitals.clone();
+
+        for vital_id in vital_ids {
+            if let Some(meta) = self.vital_metas.get(&vital_id).cloned() {
+                for cfg in &meta.derivations {
+
+                    let mut source_data_bufs = Vec::new();
+                    let mut source_conf_bufs = Vec::new();
+                    let mut missing_source = false;
+
+                    for source_id in &cfg.sources {
+                        if let Some(buf) = self.signal_data.get(source_id) {
+                            source_data_bufs.push(buf.compute_average());
+                            if let Some(c_buf) = self.signal_confs.get(source_id) {
+                                source_conf_bufs.push(c_buf.compute_average());
+                            } else {
+                                source_conf_bufs.push(vec![1.0; n_frames]); 
+                            }
+                        } else {
+                            missing_source = true;
+                            break;
+                        }
+                    }
+
+                    if missing_source || source_data_bufs.is_empty() || source_data_bufs[0].len() != n_frames {
+                        continue;
+                    }
+
+                    let target_fs = self.config.fps_target;
+                    let max_window_samples = (cfg.preferred_window_seconds * target_fs) as usize;
+                    let min_window_samples = (cfg.min_window_seconds * target_fs) as usize;
+                    let stride_samples = (cfg.rolling_stride_seconds * target_fs).round() as usize;
+                    let stride_samples = stride_samples.max(1);
+
+                    if n_frames < min_window_samples {
+                        continue;
+                    }
+
+                    let mut out_data = vec![f32::NAN; n_frames];
+                    let mut out_conf = vec![f32::NAN; n_frames];
+
+                    // We will keep track of calculated points for interpolation
+                    let mut calc_indices = Vec::new();
+                    let mut calc_vals = Vec::new();
+                    let mut calc_confs = Vec::new();
+
+                    // Step through the array using the defined stride
+                    let mut i = min_window_samples - 1;
+                    while i < n_frames {
+                        let start_idx = i.saturating_sub(max_window_samples - 1);
+                        let end_idx = i + 1;
+
+                        let ts_slice = &self.timestamps[start_idx..end_idx];
+                        let actual_fs = if ts_slice.len() > 1 {
+                            let duration = ts_slice.last().unwrap() - ts_slice.first().unwrap();
+                            if duration > 0.0 { (ts_slice.len() - 1) as f32 / duration as f32 } else { target_fs }
+                        } else {
+                            target_fs
+                        };
+
+                        let mut inputs: Vec<&[f32]> = Vec::with_capacity(source_data_bufs.len());
+                        let mut confs: Vec<&[f32]> = Vec::with_capacity(source_conf_bufs.len());
+
+                        for j in 0..source_data_bufs.len() {
+                            inputs.push(&source_data_bufs[j][start_idx..end_idx]);
+                            confs.push(&source_conf_bufs[j][start_idx..end_idx]);
+                        }
+
+                        let slice_avg_conf = confs[0].iter().sum::<f32>() / confs[0].len() as f32;
+
+                        let (val, conf) = SessionCore::evaluate_derivation(
+                            cfg, &inputs, &confs, ts_slice, actual_fs, slice_avg_conf, global_results, &mut self.fft_scratch
+                        );
+
+                        if val >= cfg.min_value && val <= cfg.max_value {
+                            calc_indices.push(i as f32);
+                            calc_vals.push(val);
+                            calc_confs.push(conf);
+
+                            // Also drop it directly into the output arrays
+                            out_data[i] = val;
+                            out_conf[i] = conf;
+                        }
+
+                        // Always calculate the very last frame, otherwise jump by stride
+                        if i == n_frames - 1 {
+                            break;
+                        }
+                        i += stride_samples;
+                        if i >= n_frames {
+                            i = n_frames - 1;
+                        }
+                    }
+
+                    // Linearly interpolate the gaps between calculated strides
+                    if calc_indices.len() > 1 {
+                        let all_indices: Vec<f32> = (0..n_frames).map(|x| x as f32).collect();
+
+                        // We only interpolate from the first calculated point to the end.
+                        // Everything before min_window_samples remains NaN.
+                        let first_calc_idx = calc_indices[0] as usize;
+                        let target_indices = &all_indices[first_calc_idx..];
+
+                        // Interpolate data and confidence
+                        let interp_data = crate::signal::interp_linear_1d(&calc_indices, &calc_vals, target_indices);
+                        let interp_conf = crate::signal::interp_linear_1d(&calc_indices, &calc_confs, target_indices);
+
+                        out_data[first_calc_idx..].copy_from_slice(&interp_data);
+                        out_conf[first_calc_idx..].copy_from_slice(&interp_conf);
+                    }
+
+                    results.insert(vital_id.clone(), WaveformResult {
+                        data: out_data,
+                        confidence: out_conf,
+                        unit: meta.unit.clone(),
+                        note: format!("Rolling estimate of {} with frame-wise confidence levels.", meta.display_name),
+                    });
+                    break;
+                }
+            }
+        }
+
+        if results.is_empty() { None } else { Some(results) }
+    }
+
     /// Bundles the evaluated results and requested waveforms into the final returned struct.
     ///
     /// # Arguments
     /// * `mode` - The operational mode determining the span of the returned output.
     /// * `scalar_results` - Pre-computed vital sign values.
+    /// * `rolling_results` - Pre-computed rolling vitals results (optional).
     ///
     /// # Returns
     /// The formatted `SessionResult`.
-    fn construct_output(&mut self, mode: WaveformMode, scalar_results: HashMap<String, (f32, f32)>) -> SessionResult {
+    fn construct_output(
+        &mut self, 
+        mode: WaveformMode, 
+        scalar_results: HashMap<String, (f32, f32)>,
+        rolling_results: Option<HashMap<String, WaveformResult>>
+    ) -> SessionResult {
         let start_index = match mode {
             WaveformMode::Global => 0,
             WaveformMode::Windowed { seconds } => {
@@ -499,6 +683,7 @@ impl SessionCore {
             face: face_result,
             waveforms: waveforms_out,
             vitals: vitals_out,
+            rolling_vitals: rolling_results,
             fps: effective_fps,
             message: "The provided values are estimates and should be interpreted according to the provided confidence scores. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.".to_string(),
         }
@@ -630,6 +815,7 @@ mod tests {
             input_size: 30,
             n_inputs: 4,
             roi_method: "face".to_string(),
+            estimate_rolling_vitals: None,
         }
     }
 
@@ -715,6 +901,68 @@ mod tests {
             &99.0, 
             "The kept history should be the most recent data"
         );
+    }
+
+    #[test]
+    fn test_session_rolling_vitals_flag_logic() {
+        let mut config = mock_config(30.0);
+
+        config.estimate_rolling_vitals = Some(false);
+        let session = Session::new(config.clone());
+        let input = mock_input(vec![0.0, 0.1, 0.2], vec![1.0, 2.0, 3.0]);
+
+        let res = session.process(input.clone(), WaveformMode::Global);
+        assert!(res.rolling_vitals.is_none());
+
+        config.estimate_rolling_vitals = Some(true);
+        let session_stateful = Session::new(config);
+        let res = session_stateful.process(input, WaveformMode::Incremental);
+        assert!(res.rolling_vitals.is_none());
+    }
+
+    #[test]
+    fn test_session_rolling_vitals_output() {
+        let mut config = mock_config(10.0);
+        config.estimate_rolling_vitals = Some(true);
+        config.supported_vitals = vec!["heart_rate".to_string()];
+        let session = Session::new(config);
+
+        let fs = 10.0;
+        let seconds = 10;
+        let n_samples = seconds * fs as usize;
+        let timestamps: Vec<f64> = (0..n_samples).map(|i| i as f64 / fs).collect();
+        let ppg_data: Vec<f32> = (0..n_samples)
+            .map(|i| (2.0 * std::f32::consts::PI * 1.0 * (i as f32 / fs as f32)).sin())
+            .collect();
+
+        let mut signals = HashMap::new();
+        signals.insert(
+            "ppg_waveform".to_string(),
+            SignalInput {
+                data: ppg_data,
+                confidence: vec![1.0; n_samples]
+            }
+        );
+
+        let input = SessionInput {
+            timestamp: timestamps,
+            signals,
+            face: None,
+        };
+
+        let res = session.process(input, WaveformMode::Global);
+
+        let rolling = res.rolling_vitals.expect("Rolling vitals should be present");
+        let hr_rolling = rolling.get("heart_rate").expect("Heart rate should be in rolling results");
+
+        assert_eq!(hr_rolling.data.len(), n_samples);
+
+        assert!(hr_rolling.data[0].is_nan());
+
+        let last_val = hr_rolling.data[n_samples - 1];
+        assert!((last_val - 60.0).abs() < 1.0, "Expected last rolling HR ~60, got {}", last_val);
+
+        assert!(hr_rolling.confidence[n_samples - 1] > 0.8);
     }
 
     #[test]
