@@ -9,13 +9,16 @@ use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 use crate::geometry::roi;
 use crate::types::{Rect, RoiMethod, FaceDetector};
 use crate::types::VitalDisplayMeta;
+use crate::state::frames::compute_buffer_config;
 
 pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_respiratory_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
+    m.add_function(wrap_pyfunction!(py_compute_buffer_config, m)?)?;
     Ok(())
 }
 
@@ -27,6 +30,17 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
     
     let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
     
+    Ok((res.value, res.confidence))
+}
+
+#[pyfunction]
+fn estimate_respiratory_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> PyResult<(f32, f32)> {
+    let s = signal.as_slice()?;
+    let bounds = RateBounds { min: 3.0, max: 60.0 };
+    let strategy = RateStrategy::Periodogram { target_res_hz: 0.01 };
+
+    let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
+
     Ok((res.value, res.confidence))
 }
 
@@ -133,4 +147,10 @@ fn calculate_roi(
 #[pyfunction]
 fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalDisplayMeta>> {
     Ok(crate::get_vital_info(vital_id.to_string()))
+}
+
+#[pyfunction]
+#[pyo3(name = "compute_buffer_config")]
+fn py_compute_buffer_config(_py: Python, config: &crate::types::SessionConfig) -> PyResult<crate::types::BufferConfig> {
+    Ok(compute_buffer_config(config.clone()))
 }

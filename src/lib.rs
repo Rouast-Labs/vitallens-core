@@ -59,6 +59,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<types::InferenceCommand>()?;
     m.add_class::<types::ExecutionPlan>()?;    
     m.add_class::<types::VitalDisplayMeta>()?;
+    m.add_class::<state::frames::BufferPlanner>()?;
 
     bindings::python::register_functions(m)?;
     

@@ -1,6 +1,9 @@
 use crate::types::{Rect, SessionConfig, BufferConfig, InferenceMode, BufferAction, BufferActionType, InferenceCommand, ExecutionPlan, BufferMetadata};
 use crate::geometry::roi;
 
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
 const MAX_BASE64_BYTES: f64 = 5_760_000.0;
 const MAX_STREAM_POLICY_FRAMES: u32 = 150;
 const BASE64_OVERHEAD: f64 = 1.3333;
@@ -41,6 +44,7 @@ pub fn compute_buffer_config(config: SessionConfig) -> BufferConfig {
 
 /// Manages the tracking, matching, and lifecycle of video frame buffers across a session.
 #[derive(Debug)]
+#[cfg_attr(feature = "python", pyclass)]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Object))]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct BufferPlanner {
@@ -187,6 +191,32 @@ impl BufferPlanner {
             InferenceMode::Stream => true,
             InferenceMode::File => count >= self.config.file_max,
         }
+    }
+}
+
+#[cfg(feature = "python")]
+#[pymethods]
+impl BufferPlanner {
+    #[new]
+    pub fn py_new(config: BufferConfig) -> Self {
+        Self::new(config)
+    }
+
+    #[pyo3(name = "evaluate_target")]
+    pub fn py_evaluate_target(&self, target_roi: Rect, timestamp: f64, active_buffers: Vec<BufferMetadata>) -> BufferAction {
+        self.evaluate_target(target_roi, timestamp, active_buffers)
+    }
+
+    #[pyo3(name = "poll")]
+    pub fn py_poll(
+        &self, 
+        active_buffers: Vec<BufferMetadata>, 
+        current_time: f64, 
+        mode: InferenceMode, 
+        has_state: bool, 
+        flush: bool
+    ) -> ExecutionPlan {
+        self.poll(active_buffers, current_time, mode, has_state, flush)
     }
 }
 
