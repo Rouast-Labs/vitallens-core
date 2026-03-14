@@ -2484,13 +2484,7 @@
         ],
         "note": "Face detection coordinates for this face with live confidence levels."
     },
-    "vital_signs": {
-        "respiratory_rate": {
-            "value": 8.0,
-            "unit": "bpm",
-            "confidence": 0.9744,
-            "note": "Legacy Verified (FFT-based)"
-        },
+    "waveforms": {
         "ppg_waveform": {
             "data": [
                 0.0524,
@@ -3224,12 +3218,6 @@
                 334
             ]
         },
-        "heart_rate": {
-            "value": 75.52,
-            "unit": "bpm",
-            "confidence": 0.8834,
-            "note": "Legacy Verified (FFT-based)"
-        },
         "respiratory_waveform": {
             "data": [
                 -0.1841,
@@ -3949,6 +3937,20 @@
                 122,
                 342
             ]
+        }
+    },
+    "vitals": {
+        "respiratory_rate": {
+            "value": 8.0,
+            "unit": "bpm",
+            "confidence": 0.9744,
+            "note": "Legacy Verified (FFT-based)"
+        },
+        "heart_rate": {
+            "value": 75.52,
+            "unit": "bpm",
+            "confidence": 0.8834,
+            "note": "Legacy Verified (FFT-based)"
         }
     },
     "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.",

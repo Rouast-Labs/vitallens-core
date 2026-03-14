@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::collections::HashMap;
 use serde::Deserialize;
 use test_generator::test_resources;
 
@@ -12,16 +13,11 @@ const MATCHING_TOLERANCE_RESP: i32 = 3;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
-    vital_signs: Vitals,
+    #[serde(default)]
+    waveforms: HashMap<String, Waveform>,
+    #[serde(default)]
+    vitals: HashMap<String, Vital>,
     fps: f32, 
-}
-
-#[derive(Deserialize, Debug)]
-struct Vitals {
-    ppg_waveform: Option<Waveform>,
-    respiratory_waveform: Option<Waveform>,     
-    heart_rate: Option<Vital>,
-    respiratory_rate: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -153,18 +149,18 @@ fn test_data_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    if let Some(ppg) = ref_data.vital_signs.ppg_waveform {
-        if let Some(ground_truth) = ppg.peak_indices {
+    if let Some(ppg) = ref_data.waveforms.get("ppg_waveform") {
+        if let Some(ground_truth) = &ppg.peak_indices {
             if let Err(e) = verify_peaks(
-                filename, "PPG-Blind", fs, &ppg.data, &ground_truth, 
+                filename, "PPG-Blind", fs, &ppg.data, ground_truth, 
                 MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 1.0, None 
             ) {
                 failures.push(e);
             }
 
-            if let Some(hr) = ref_data.vital_signs.heart_rate {
+            if let Some(hr) = ref_data.vitals.get("heart_rate") {
                 if let Err(e) = verify_peaks(
-                    filename, "PPG-Hinted", fs, &ppg.data, &ground_truth, 
+                    filename, "PPG-Hinted", fs, &ppg.data, ground_truth, 
                     MATCHING_TOLERANCE_PPG, true, 0.5, 2.5, 1.0, Some(hr.value)
                 ) {
                     failures.push(e);
@@ -173,18 +169,18 @@ fn test_data_integrity(resource: &str) {
         }
     }
 
-    if let Some(resp) = ref_data.vital_signs.respiratory_waveform {
-        if let Some(ground_truth) = resp.peak_indices {
+    if let Some(resp) = ref_data.waveforms.get("respiratory_waveform") {
+        if let Some(ground_truth) = &resp.peak_indices {
             if let Err(e) = verify_peaks(
-                filename, "RESP-Blind", fs, &resp.data, &ground_truth, 
+                filename, "RESP-Blind", fs, &resp.data, ground_truth, 
                 MATCHING_TOLERANCE_RESP, false, 1.2, 1.5, 0.25, None 
             ) {
                 failures.push(e);
             }
 
-            if let Some(rr) = ref_data.vital_signs.respiratory_rate {
+            if let Some(rr) = ref_data.vitals.get("respiratory_rate") {
                 if let Err(e) = verify_peaks(
-                    filename, "RESP-Hinted", fs, &resp.data, &ground_truth, 
+                    filename, "RESP-Hinted", fs, &resp.data, ground_truth, 
                     MATCHING_TOLERANCE_RESP, false, 1.2, 1.5, 0.25, Some(rr.value)
                 ) {
                     failures.push(e);

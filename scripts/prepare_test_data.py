@@ -208,23 +208,25 @@ def main():
     except FileNotFoundError: return
 
     data = raw_input[0] if isinstance(raw_input, list) else raw_input
-    vitals = data.get("vital_signs", {})
     
+    waveforms = data.setdefault("waveforms", {})
+    vitals = data.setdefault("vitals", {})
+        
     fs = data.get("fps", data.get("fs", 30.0))
     if "fs" in data: del data["fs"]
     data["fps"] = fs
 
-    for k in ["rolling_heart_rate", "rolling_respiratory_rate"]:
-        if k in vitals: del vitals[k]
+    if "rolling_vitals" in data:
+        data["rolling_vitals"] = {}
 
     n_samples = data.get("n", 0)
-    if n_samples == 0 and "ppg_waveform" in vitals:
-        n_samples = len(vitals["ppg_waveform"]["data"])
+    if n_samples == 0 and "ppg_waveform" in waveforms:
+        n_samples = len(waveforms["ppg_waveform"]["data"])
     duration_sec = n_samples / fs if fs > 0 else 0
     print(f" -> Duration: {duration_sec:.2f}s (FPS: {fs}Hz)")
 
-    if "ppg_waveform" in vitals:
-        wave = vitals["ppg_waveform"]
+    if "ppg_waveform" in waveforms:
+        wave = waveforms["ppg_waveform"]
         conf_arr = wave.get("confidence")
         
         CONF_THRESH = 0.5
@@ -260,8 +262,8 @@ def main():
                 vitals[key]["note"] = "Ground Truth (NeuroKit2 Verified)"
                 print(f"    [WRITE] {key}: {vitals[key]['value']} (conf: {vitals[key]['confidence']})")
 
-    if "respiratory_waveform" in vitals:
-        wave = vitals["respiratory_waveform"]
+    if "respiratory_waveform" in waveforms:
+        wave = waveforms["respiratory_waveform"]
         conf_arr = wave.get("confidence")
         
         annotator = PeakAnnotator(

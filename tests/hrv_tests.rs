@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::collections::HashMap;
 use serde::Deserialize;
 use test_generator::test_resources;
 
@@ -17,20 +18,11 @@ const STRESS_INDEX_TOLERANCE: f32 = 20.0;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
-    vital_signs: Vitals,
+    #[serde(default)]
+    waveforms: HashMap<String, Waveform>,
+    #[serde(default)]
+    vitals: HashMap<String, Vital>,
     fps: f32, 
-}
-
-#[derive(Deserialize, Debug)]
-struct Vitals {
-    ppg_waveform: Option<Waveform>,
-    heart_rate: Option<Vital>,
-    hrv_sdnn: Option<Vital>,
-    hrv_rmssd: Option<Vital>,
-    hrv_lfhf: Option<Vital>,
-    hrv_pnn50: Option<Vital>,
-    hrv_sd1sd2: Option<Vital>,
-    stress_index: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -369,11 +361,11 @@ fn test_hrv_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    let rate_hint = ref_data.vital_signs.heart_rate.as_ref().map(|hr| hr.value);
+    let rate_hint = ref_data.vitals.get("heart_rate").map(|hr| hr.value);
     
-    if let Some(ppg) = &ref_data.vital_signs.ppg_waveform {
+    if let Some(ppg) = ref_data.waveforms.get("ppg_waveform") {
         
-        if let Some(sdnn_ref) = &ref_data.vital_signs.hrv_sdnn {
+        if let Some(sdnn_ref) = ref_data.vitals.get("hrv_sdnn") {
             if let Err(e) = verify_sdnn(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), sdnn_ref.value, rate_hint
             ) {
@@ -381,7 +373,7 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        if let Some(rmssd_ref) = &ref_data.vital_signs.hrv_rmssd {
+        if let Some(rmssd_ref) = ref_data.vitals.get("hrv_rmssd") {
             if let Err(e) = verify_rmssd(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), rmssd_ref.value, rate_hint
             ) {
@@ -389,7 +381,7 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        if let Some(lfhf_ref) = &ref_data.vital_signs.hrv_lfhf {
+        if let Some(lfhf_ref) = ref_data.vitals.get("hrv_lfhf") {
             if let Err(e) = verify_lfhf(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), lfhf_ref.value, rate_hint
             ) {
@@ -397,7 +389,7 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        if let Some(pnn50_ref) = &ref_data.vital_signs.hrv_pnn50 {
+        if let Some(pnn50_ref) = ref_data.vitals.get("hrv_pnn50") {
             if let Err(e) = verify_pnn50(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), pnn50_ref.value, rate_hint
             ) {
@@ -405,7 +397,7 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
 
-        if let Some(sd1sd2_ref) = &ref_data.vital_signs.hrv_sd1sd2 {
+        if let Some(sd1sd2_ref) = ref_data.vitals.get("hrv_sd1sd2") {
             if let Err(e) = verify_sd1sd2(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), sd1sd2_ref.value, rate_hint
             ) {
@@ -413,7 +405,7 @@ fn test_hrv_integrity(resource: &str) {
             }
         }
         
-        if let Some(si_ref) = &ref_data.vital_signs.stress_index {
+        if let Some(si_ref) = ref_data.vitals.get("stress_index") {
             if let Err(e) = verify_stress_index(
                 filename, fs, &ppg.data, ppg.confidence.as_ref(), si_ref.value, rate_hint
             ) {

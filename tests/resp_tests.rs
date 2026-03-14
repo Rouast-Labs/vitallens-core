@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::collections::HashMap;
 use serde::Deserialize;
 use test_generator::test_resources;
 
@@ -15,14 +16,11 @@ fn init_logger() {
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
-    vital_signs: Vitals,
-    fps: f32, 
-}
-
-#[derive(Deserialize, Debug)]
-struct Vitals {
-    respiratory_waveform: Option<Waveform>,
-    ie_ratio: Option<Vital>,
+    #[serde(default)]
+    waveforms: HashMap<String, Waveform>,
+    #[serde(default)]
+    vitals: HashMap<String, Vital>,
+    fps: f32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -47,7 +45,7 @@ fn test_ie_ratio_accuracy(resource: &str) {
     let reader = BufReader::new(file);
     let ref_data: ReferenceData = serde_json::from_reader(reader).expect("Failed to parse JSON");
 
-    if let (Some(gt), Some(resp)) = (ref_data.vital_signs.ie_ratio, ref_data.vital_signs.respiratory_waveform) {
+    if let (Some(gt), Some(resp)) = (ref_data.vitals.get("ie_ratio"), ref_data.waveforms.get("respiratory_waveform")) {
         let meta = registry::get_vital_meta("ie_ratio").unwrap();
         let min_win = meta.derivations[0].min_window_seconds;
         let duration_sec = resp.data.len() as f32 / ref_data.fps;
@@ -71,12 +69,12 @@ fn test_ie_ratio_accuracy(resource: &str) {
         };
         
         let session = Session::new(config);
-        let conf = resp.confidence.unwrap_or_else(|| vec![1.0; resp.data.len()]);
+        let conf = resp.confidence.clone().unwrap_or_else(|| vec![1.0; resp.data.len()]);
 
         let input = SessionInput {
             timestamp: (0..resp.data.len()).map(|t| t as f64 / ref_data.fps as f64).collect(),
             signals: [("respiratory_waveform".to_string(), vitallens_core::types::SignalInput { 
-                data: resp.data, 
+                data: resp.data.clone(), 
                 confidence: conf 
             })].into(),
             face: None,

@@ -12648,19 +12648,7 @@
         ],
         "note": "Face detection coordinates for this face with live confidence levels."
     },
-    "vital_signs": {
-        "hrv_sdnn": {
-            "value": 82.2,
-            "unit": "ms",
-            "confidence": 0.90,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
-        "heart_rate": {
-            "value": 71.0,
-            "unit": "bpm",
-            "confidence": 0.8975,
-            "note": "Legacy Verified (FFT-based)"
-        },
+    "waveforms": {
         "ppg_waveform": {
             "data": [
                 -0.0086,
@@ -16358,12 +16346,6 @@
                 1803
             ]
         },
-        "respiratory_rate": {
-            "value": 4.0,
-            "unit": "bpm",
-            "confidence": 0.9883,
-            "note": "Legacy Verified (FFT-based)"
-        },
         "respiratory_waveform": {
             "data": [
                 -0.1458,
@@ -19989,6 +19971,26 @@
                 1048,
                 1506
             ]
+        }
+    },
+    "vitals": {
+        "hrv_sdnn": {
+            "value": 82.2,
+            "unit": "ms",
+            "confidence": 0.90,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "heart_rate": {
+            "value": 71.0,
+            "unit": "bpm",
+            "confidence": 0.8975,
+            "note": "Legacy Verified (FFT-based)"
+        },
+        "respiratory_rate": {
+            "value": 4.0,
+            "unit": "bpm",
+            "confidence": 0.9883,
+            "note": "Legacy Verified (FFT-based)"
         },
         "hrv_rmssd": {
             "value": 78.97,

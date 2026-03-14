@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
+use std::collections::HashMap;
 use serde::Deserialize;
 use test_generator::test_resources;
 
@@ -11,16 +12,11 @@ const RATE_TOLERANCE_BPM: f32 = 3.0;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
-    vital_signs: Vitals,
+    #[serde(default)]
+    waveforms: HashMap<String, Waveform>,
+    #[serde(default)]
+    vitals: HashMap<String, Vital>,
     fps: f32, 
-}
-
-#[derive(Deserialize, Debug)]
-struct Vitals {
-    ppg_waveform: Option<Waveform>,
-    respiratory_waveform: Option<Waveform>,
-    heart_rate: Option<Vital>,
-    respiratory_rate: Option<Vital>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -112,27 +108,27 @@ fn test_rate_integrity(resource: &str) {
     
     let mut failures = Vec::new();
 
-    if let (Some(ppg), Some(hr_ref)) = (&ref_data.vital_signs.ppg_waveform, &ref_data.vital_signs.heart_rate) {
+    if let (Some(ppg), Some(hr_ref)) = (ref_data.waveforms.get("ppg_waveform"), ref_data.vitals.get("heart_rate")) {
         if let Err(e) = verify_rate(
-            filename, 
-            "heart_rate", 
-            fs, 
-            &ppg.data, 
-            hr_ref.value, 
-            None 
+            filename,
+            "heart_rate",
+            fs,
+            &ppg.data,
+            hr_ref.value,
+            None
         ) {
             failures.push(e);
         }
     }
 
-    if let (Some(resp), Some(rr_ref)) = (&ref_data.vital_signs.respiratory_waveform, &ref_data.vital_signs.respiratory_rate) {
+    if let (Some(resp), Some(rr_ref)) = (ref_data.waveforms.get("respiratory_waveform"), ref_data.vitals.get("respiratory_rate")) {
         if let Err(e) = verify_rate(
-            filename, 
-            "respiratory_rate", 
-            fs, 
-            &resp.data, 
-            rr_ref.value, 
-            None 
+            filename,
+            "respiratory_rate",
+            fs,
+            &resp.data,
+            rr_ref.value,
+            None
         ) {
             failures.push(e);
         }

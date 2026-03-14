@@ -13432,7 +13432,7 @@
         ],
         "note": "Face detection coordinates for this face with live confidence levels."
     },
-    "vital_signs": {
+    "waveforms": {
         "respiratory_waveform": {
             "data": [
                 -0.1356,
@@ -21191,7 +21191,9 @@
                 1855,
                 1892
             ]
-        },
+        }
+    },
+    "vitals": {
         "hrv_lfhf": {
             "value": 0.3,
             "unit": "unitless",

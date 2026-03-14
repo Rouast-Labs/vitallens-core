@@ -29,24 +29,12 @@ struct FaceRef {
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
-    vital_signs: Vitals,
+    #[serde(default)]
+    waveforms: HashMap<String, Waveform>,
+    #[serde(default)]
+    vitals: HashMap<String, Vital>,
     face: Option<FaceRef>,
-    fps: f32, 
-}
-
-#[derive(Deserialize, Debug)]
-struct Vitals {
-    ppg_waveform: Option<Waveform>,
-    respiratory_waveform: Option<Waveform>,
-    heart_rate: Option<Vital>,
-    respiratory_rate: Option<Vital>,
-    hrv_sdnn: Option<Vital>,
-    hrv_rmssd: Option<Vital>,
-    hrv_lfhf: Option<Vital>,
-    hrv_pnn50: Option<Vital>,
-    hrv_sd1sd2: Option<Vital>,
-    ie_ratio: Option<Vital>,
-    stress_index: Option<Vital>,
+    fps: f32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -82,7 +70,7 @@ fn test_session(resource: &str) {
     println!("\n=== SESSION E2E: {} ===", filename);
 
     let mut cases = Vec::new();
-    let duration_sec = if let Some(ppg) = &ref_data.vital_signs.ppg_waveform {
+    let duration_sec = if let Some(ppg) = ref_data.waveforms.get("ppg_waveform") {
         ppg.data.len() as f32 / ref_data.fps
     } else {
         0.0
@@ -110,15 +98,15 @@ fn test_session(resource: &str) {
         }
     };
 
-    add_case("heart_rate", ref_data.vital_signs.heart_rate.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_HR_BPM);
-    add_case("respiratory_rate", ref_data.vital_signs.respiratory_rate.as_ref(), ref_data.vital_signs.respiratory_waveform.as_ref(), "respiratory_waveform", TOLERANCE_RR_BPM);
-    add_case("hrv_sdnn", ref_data.vital_signs.hrv_sdnn.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SDNN_MS);
-    add_case("hrv_rmssd", ref_data.vital_signs.hrv_rmssd.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_RMSSD_MS);
-    add_case("hrv_lfhf", ref_data.vital_signs.hrv_lfhf.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_LFHF);
-    add_case("hrv_pnn50", ref_data.vital_signs.hrv_pnn50.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_PNN50);
-    add_case("hrv_sd1sd2", ref_data.vital_signs.hrv_sd1sd2.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_SD1SD2);
-    add_case("ie_ratio", ref_data.vital_signs.ie_ratio.as_ref(), ref_data.vital_signs.respiratory_waveform.as_ref(), "respiratory_waveform", TOLERANCE_IE_RATIO);
-    add_case("stress_index", ref_data.vital_signs.stress_index.as_ref(), ref_data.vital_signs.ppg_waveform.as_ref(), "ppg_waveform", TOLERANCE_STRESS_INDEX);
+    add_case("heart_rate", ref_data.vitals.get("heart_rate"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_HR_BPM);
+    add_case("respiratory_rate", ref_data.vitals.get("respiratory_rate"), ref_data.waveforms.get("respiratory_waveform"), "respiratory_waveform", TOLERANCE_RR_BPM);
+    add_case("hrv_sdnn", ref_data.vitals.get("hrv_sdnn"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_SDNN_MS);
+    add_case("hrv_rmssd", ref_data.vitals.get("hrv_rmssd"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_RMSSD_MS);
+    add_case("hrv_lfhf", ref_data.vitals.get("hrv_lfhf"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_LFHF);
+    add_case("hrv_pnn50", ref_data.vitals.get("hrv_pnn50"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_PNN50);
+    add_case("hrv_sd1sd2", ref_data.vitals.get("hrv_sd1sd2"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_SD1SD2);
+    add_case("ie_ratio", ref_data.vitals.get("ie_ratio"), ref_data.waveforms.get("respiratory_waveform"), "respiratory_waveform", TOLERANCE_IE_RATIO);
+    add_case("stress_index", ref_data.vitals.get("stress_index"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_STRESS_INDEX);
 
     if cases.is_empty() {
         println!(" [SKIP] No valid vitals found in file.");

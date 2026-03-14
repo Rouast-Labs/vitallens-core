@@ -23582,31 +23582,7 @@
         ],
         "note": "Face detection coordinates for this face with live confidence levels."
     },
-    "vital_signs": {
-        "hrv_rmssd": {
-            "value": 27.01,
-            "unit": "ms",
-            "confidence": 0.99,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
-        "heart_rate": {
-            "value": 103.52,
-            "unit": "bpm",
-            "confidence": 0.9853,
-            "note": "Legacy Verified (FFT-based)"
-        },
-        "hrv_sdnn": {
-            "value": 61.91,
-            "unit": "ms",
-            "confidence": 0.99,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
-        "hrv_lfhf": {
-            "value": 2.65,
-            "unit": "unitless",
-            "confidence": 0.99,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
+    "waveforms": {
         "ppg_waveform": {
             "data": [
                 0.1052,
@@ -30565,12 +30541,6 @@
                 3349
             ]
         },
-        "respiratory_rate": {
-            "value": 23.5,
-            "unit": "bpm",
-            "confidence": 0.9977,
-            "note": "Legacy Verified (FFT-based)"
-        },
         "respiratory_waveform": {
             "data": [
                 -0.1253,
@@ -37357,6 +37327,38 @@
                 3234,
                 3302
             ]
+        }
+    },
+    "vitals": {
+        "hrv_rmssd": {
+            "value": 27.01,
+            "unit": "ms",
+            "confidence": 0.99,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "heart_rate": {
+            "value": 103.52,
+            "unit": "bpm",
+            "confidence": 0.9853,
+            "note": "Legacy Verified (FFT-based)"
+        },
+        "hrv_sdnn": {
+            "value": 61.91,
+            "unit": "ms",
+            "confidence": 0.99,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "hrv_lfhf": {
+            "value": 2.65,
+            "unit": "unitless",
+            "confidence": 0.99,
+            "note": "Ground Truth (NeuroKit2 Verified)"
+        },
+        "respiratory_rate": {
+            "value": 23.5,
+            "unit": "bpm",
+            "confidence": 0.9977,
+            "note": "Legacy Verified (FFT-based)"
         },
         "stress_index": {
             "value": 75.0,
