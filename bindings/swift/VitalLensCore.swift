@@ -1580,10 +1580,11 @@ public struct SessionConfig {
     public var inputSize: UInt64
     public var nInputs: UInt64
     public var roiMethod: String
+    public var estimateRollingVitals: Bool?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(modelName: String, supportedVitals: [String], returnWaveforms: [String]?, fpsTarget: Float, inputSize: UInt64, nInputs: UInt64, roiMethod: String) {
+    public init(modelName: String, supportedVitals: [String], returnWaveforms: [String]?, fpsTarget: Float, inputSize: UInt64, nInputs: UInt64, roiMethod: String, estimateRollingVitals: Bool? = nil) {
         self.modelName = modelName
         self.supportedVitals = supportedVitals
         self.returnWaveforms = returnWaveforms
@@ -1591,6 +1592,7 @@ public struct SessionConfig {
         self.inputSize = inputSize
         self.nInputs = nInputs
         self.roiMethod = roiMethod
+        self.estimateRollingVitals = estimateRollingVitals
     }
 }
 
@@ -1619,6 +1621,9 @@ extension SessionConfig: Equatable, Hashable {
         if lhs.roiMethod != rhs.roiMethod {
             return false
         }
+        if lhs.estimateRollingVitals != rhs.estimateRollingVitals {
+            return false
+        }
         return true
     }
 
@@ -1630,6 +1635,7 @@ extension SessionConfig: Equatable, Hashable {
         hasher.combine(inputSize)
         hasher.combine(nInputs)
         hasher.combine(roiMethod)
+        hasher.combine(estimateRollingVitals)
     }
 }
 
@@ -1647,7 +1653,8 @@ public struct FfiConverterTypeSessionConfig: FfiConverterRustBuffer {
                 fpsTarget: FfiConverterFloat.read(from: &buf), 
                 inputSize: FfiConverterUInt64.read(from: &buf), 
                 nInputs: FfiConverterUInt64.read(from: &buf), 
-                roiMethod: FfiConverterString.read(from: &buf)
+                roiMethod: FfiConverterString.read(from: &buf), 
+                estimateRollingVitals: FfiConverterOptionBool.read(from: &buf)
         )
     }
 
@@ -1659,6 +1666,7 @@ public struct FfiConverterTypeSessionConfig: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.inputSize, into: &buf)
         FfiConverterUInt64.write(value.nInputs, into: &buf)
         FfiConverterString.write(value.roiMethod, into: &buf)
+        FfiConverterOptionBool.write(value.estimateRollingVitals, into: &buf)
     }
 }
 
@@ -1763,16 +1771,18 @@ public struct SessionResult {
     public var face: FaceResult?
     public var waveforms: [String: WaveformResult]
     public var vitals: [String: VitalResult]
+    public var rollingVitals: [String: WaveformResult]?
     public var fps: Float
     public var message: String
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(timestamp: [Double], face: FaceResult?, waveforms: [String: WaveformResult], vitals: [String: VitalResult], fps: Float, message: String) {
+    public init(timestamp: [Double], face: FaceResult?, waveforms: [String: WaveformResult], vitals: [String: VitalResult], rollingVitals: [String: WaveformResult]?, fps: Float, message: String) {
         self.timestamp = timestamp
         self.face = face
         self.waveforms = waveforms
         self.vitals = vitals
+        self.rollingVitals = rollingVitals
         self.fps = fps
         self.message = message
     }
@@ -1794,6 +1804,9 @@ extension SessionResult: Equatable, Hashable {
         if lhs.vitals != rhs.vitals {
             return false
         }
+        if lhs.rollingVitals != rhs.rollingVitals {
+            return false
+        }
         if lhs.fps != rhs.fps {
             return false
         }
@@ -1808,6 +1821,7 @@ extension SessionResult: Equatable, Hashable {
         hasher.combine(face)
         hasher.combine(waveforms)
         hasher.combine(vitals)
+        hasher.combine(rollingVitals)
         hasher.combine(fps)
         hasher.combine(message)
     }
@@ -1825,6 +1839,7 @@ public struct FfiConverterTypeSessionResult: FfiConverterRustBuffer {
                 face: FfiConverterOptionTypeFaceResult.read(from: &buf), 
                 waveforms: FfiConverterDictionaryStringTypeWaveformResult.read(from: &buf), 
                 vitals: FfiConverterDictionaryStringTypeVitalResult.read(from: &buf), 
+                rollingVitals: FfiConverterOptionDictionaryStringTypeWaveformResult.read(from: &buf), 
                 fps: FfiConverterFloat.read(from: &buf), 
                 message: FfiConverterString.read(from: &buf)
         )
@@ -1835,6 +1850,7 @@ public struct FfiConverterTypeSessionResult: FfiConverterRustBuffer {
         FfiConverterOptionTypeFaceResult.write(value.face, into: &buf)
         FfiConverterDictionaryStringTypeWaveformResult.write(value.waveforms, into: &buf)
         FfiConverterDictionaryStringTypeVitalResult.write(value.vitals, into: &buf)
+        FfiConverterOptionDictionaryStringTypeWaveformResult.write(value.rollingVitals, into: &buf)
         FfiConverterFloat.write(value.fps, into: &buf)
         FfiConverterString.write(value.message, into: &buf)
     }
@@ -2610,6 +2626,30 @@ fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
+    typealias SwiftType = Bool?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterBool.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterBool.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -2770,6 +2810,30 @@ fileprivate struct FfiConverterOptionSequenceString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterSequenceString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionDictionaryStringTypeWaveformResult: FfiConverterRustBuffer {
+    typealias SwiftType = [String: WaveformResult]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDictionaryStringTypeWaveformResult.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDictionaryStringTypeWaveformResult.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
