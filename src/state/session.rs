@@ -218,7 +218,7 @@ impl SessionCore {
                 let bounds = crate::signal::rate::RateBounds { min: cfg.min_value, max: cfg.max_value };
                 let hint = global_results.get("heart_rate").map(|(v, _)| *v);
                 let res = crate::signal::rate::estimate_rate(
-                    inputs[0], actual_fs, bounds, strategy.clone(), hint, Some(fft_scratch)
+                    inputs[0], actual_fs, None, bounds, strategy.clone(), hint, Some(fft_scratch)
                 );
                 (res.value, slice_avg_conf)
             },

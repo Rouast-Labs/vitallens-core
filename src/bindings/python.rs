@@ -14,7 +14,9 @@ use crate::state::frames::compute_buffer_config;
 pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_respiratory_rate, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_rate_from_detections, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_hrv_metric_from_detections, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
@@ -28,7 +30,7 @@ fn estimate_heart_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32) -> P
     let bounds = RateBounds { min: 40.0, max: 220.0 }; 
     let strategy = RateStrategy::Periodogram { target_res_hz: 0.005 };
     
-    let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
+    let res = signal::estimate_rate(s, fs, None, bounds, strategy, None, None);
     
     Ok((res.value, res.confidence))
 }
@@ -39,7 +41,7 @@ fn estimate_respiratory_rate(_py: Python, signal: PyReadonlyArray1<f32>, fs: f32
     let bounds = RateBounds { min: 3.0, max: 60.0 };
     let strategy = RateStrategy::Periodogram { target_res_hz: 0.01 };
 
-    let res = signal::estimate_rate(s, fs, bounds, strategy, None, None);
+    let res = signal::estimate_rate(s, fs, None, bounds, strategy, None, None);
 
     Ok((res.value, res.confidence))
 }
@@ -78,6 +80,65 @@ fn estimate_hrv_metric(
         rate_hint
     );
     
+    Ok((val, conf_out))
+}
+
+fn py_seqs_to_peaks(sequences: Vec<Vec<f32>>) -> Vec<Vec<crate::signal::peaks::Peak>> {
+    sequences.into_iter().map(|seq| {
+        seq.into_iter().map(|x| crate::signal::peaks::Peak {
+            index: x.floor() as usize,
+            x,
+            y: 1.0,
+        }).collect()
+    }).collect()
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequences, fs, timestamps=None, confidence=None))]
+fn estimate_rate_from_detections(
+    _py: Python,
+    sequences: Vec<Vec<f32>>,
+    fs: f32,
+    timestamps: Option<Vec<f64>>,
+    confidence: Option<Vec<f32>>,
+) -> PyResult<(f32, f32)> {
+    let peak_segments = py_seqs_to_peaks(sequences);
+    let ts_slice = timestamps.as_deref();
+    let conf_slice = confidence.as_deref();
+    
+    let res = crate::signal::rate::estimate_rate_from_detections(&peak_segments, fs, ts_slice, conf_slice);
+
+    Ok((res.value, res.confidence))
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequences, fs, metric_name, timestamps=None, confidence=None))]
+fn estimate_hrv_metric_from_detections(
+    _py: Python,
+    sequences: Vec<Vec<f32>>,
+    fs: f32,
+    metric_name: &str,
+    timestamps: Option<Vec<f64>>,
+    confidence: Option<Vec<f32>>,
+) -> PyResult<(f32, f32)> {
+    let peak_segments = py_seqs_to_peaks(sequences);
+    let ts_slice = timestamps.as_deref();
+    let conf_slice = confidence.as_deref();
+
+    let metric = match metric_name.to_lowercase().as_str() {
+        "sdnn" | "hrv_sdnn" => HrvMetric::Sdnn,
+        "rmssd" | "hrv_rmssd" => HrvMetric::Rmssd,
+        "lfhf" | "hrv_lfhf" => HrvMetric::LfHf,
+        "si" | "stress_index" => HrvMetric::StressIndex,
+        "pnn50" | "hrv_pnn50" => HrvMetric::Pnn50,
+        "sd1sd2" | "hrv_sd1sd2" => HrvMetric::Sd1Sd2,
+        _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid HRV metric")),
+    };
+
+    let (val, conf_out) = crate::signal::hrv::estimate_hrv_from_detections(
+        &peak_segments, fs, metric, ts_slice, conf_slice
+    );
+
     Ok((val, conf_out))
 }
 

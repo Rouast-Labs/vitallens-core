@@ -62,11 +62,12 @@ fn verify_rate(
             
             let result = rate::estimate_rate(
                 signal, 
-                fs, 
+                fs,
+                None,
                 bounds, 
                 strategy, 
                 rate_hint, 
-                None 
+                None
             );
             (result.value, result.confidence, result.method)
         },

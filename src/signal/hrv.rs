@@ -1,4 +1,4 @@
-use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks};
+use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks, resolve_time};
 use crate::signal::filters; 
 
 /// Configuration options for extracting Normal-to-Normal (NN) intervals.
@@ -61,7 +61,7 @@ pub fn estimate_hrv(
         ..Default::default()
     };
     
-    let (intervals, min_conf_peaks) = extract_nn_intervals(&sequences, timestamps, confidence, hrv_opts);
+    let (intervals, min_conf_peaks) = extract_nn_intervals(&sequences, Some(timestamps), Some(confidence), hrv_opts);
 
     if intervals.is_empty() {
         return (0.0, 0.0);
@@ -87,6 +87,47 @@ pub fn estimate_hrv(
     (value, final_conf)
 }
 
+/// Estimates a Heart Rate Variability (HRV) metric from pre-detected peak sequences.
+///
+/// # Arguments
+/// * `sequences` - A slice of vectors, where each vector contains a continuous sequence of peaks.
+/// * `fs_fallback` - The sampling frequency in Hz to use for time resolution if timestamps are absent.
+/// * `metric` - The specific HRV metric to calculate (e.g., SDNN, RMSSD).
+/// * `timestamps` - Optional array of reference timestamps in seconds.
+/// * `confidence` - Optional array of confidence scores for the signal frames.
+///
+/// # Returns
+/// A tuple of `(calculated_value, confidence_score)`.
+pub fn estimate_hrv_from_detections(
+    sequences: &[Vec<Peak>],
+    fs_fallback: f32,
+    metric: crate::registry::HrvMetric,
+    timestamps: Option<&[f64]>,
+    confidence: Option<&[f32]>,
+) -> (f32, f32) {
+    let hrv_opts = HrvOptions {
+        fs_fallback,
+        ..Default::default()
+    };
+    
+    let (intervals, min_conf_peaks) = extract_nn_intervals(sequences, timestamps, confidence, hrv_opts);
+
+    if intervals.is_empty() {
+        return (0.0, 0.0);
+    }
+
+    let value = match metric {
+        crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
+        crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
+        crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
+        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
+        crate::registry::HrvMetric::Pnn50 => calculate_pnn50(&intervals),
+        crate::registry::HrvMetric::Sd1Sd2 => calculate_sd1sd2(&intervals),
+    };
+
+    (value, min_conf_peaks)
+}
+
 /// Extracts valid Normal-to-Normal (NN) intervals from multiple sequences of peaks.
 /// 
 /// This function prevents "phantom intervals" by only calculating differences within
@@ -94,20 +135,23 @@ pub fn estimate_hrv(
 /// 
 /// # Arguments
 /// * `sequences` - A slice of peak sequences detected from the signal.
-/// * `timestamps` - Array of reference timestamps.
-/// * `confidence` - Array of confidence scores.
+/// * `timestamps` - Optional array of reference timestamps.
+/// * `confidence` - Optional array of confidence scores.
 /// * `options` - Configuration options for HRV extraction.
 ///
 /// # Returns
 /// A tuple containing `(intervals_in_ms, minimum_confidence_used)`.
 pub fn extract_nn_intervals(
     sequences: &[Vec<Peak>],
-    timestamps: &[f64],
-    confidence: &[f32],
+    timestamps: Option<&[f64]>,
+    confidence: Option<&[f32]>,
     options: HrvOptions
 ) -> (Vec<f32>, f32) {
     let mut all_intervals = Vec::new();
     let mut all_used_confidences = Vec::new();
+    
+    let ts_slice = timestamps.unwrap_or(&[]);
+    let conf_slice = confidence.unwrap_or(&[]);
 
     for sequence in sequences {
         if sequence.len() < 2 { continue; }
@@ -116,17 +160,13 @@ pub fn extract_nn_intervals(
             let p1 = &sequence[i];
             let p2 = &sequence[i+1];
 
-            if p1.index >= confidence.len() || p2.index >= confidence.len() {
-                continue;
-            }
-
-            let c1 = confidence[p1.index];
-            let c2 = confidence[p2.index];
+            let c1 = if !conf_slice.is_empty() && p1.index < conf_slice.len() { conf_slice[p1.index] } else { 1.0 };
+            let c2 = if !conf_slice.is_empty() && p2.index < conf_slice.len() { conf_slice[p2.index] } else { 1.0 };
 
             if c1 >= options.confidence_threshold && c2 >= options.confidence_threshold {
                 
-                let t1 = resolve_time(p1, timestamps, options.fs_fallback);
-                let t2 = resolve_time(p2, timestamps, options.fs_fallback);
+                let t1 = resolve_time(p1, ts_slice, options.fs_fallback);
+                let t2 = resolve_time(p2, ts_slice, options.fs_fallback);
 
                 let diff_sec = t2 - t1;
                 
@@ -348,21 +388,6 @@ pub fn calculate_sd1sd2(nn_intervals: &[f32]) -> f32 {
     }
 }
 
-
-/// Resolves the continuous timestamp of a sub-sample peak location.
-fn resolve_time(p: &Peak, timestamps: &[f64], fs_fallback: f32) -> f64 {
-    if timestamps.len() > p.index + 1 {
-        let t_floor = timestamps[p.index];
-        let t_ceil = timestamps[p.index + 1];
-        let fraction = p.x - p.index as f32;
-        t_floor + (t_ceil - t_floor) * fraction as f64
-    } else if !timestamps.is_empty() && p.index < timestamps.len() {
-        timestamps[p.index]
-    } else {
-        p.x as f64 / fs_fallback as f64
-    }
-}
-
 /// Removes extreme outliers from a sequence of NN intervals using a median-seeded bounds check.
 fn filter_outliers(intervals: &[f32], _threshold: f32) -> Vec<f32> {
     if intervals.len() < 2 {
@@ -459,7 +484,7 @@ mod tests {
         let timestamps = vec![0.0, 1.2, 2.2]; 
         let confidence = vec![1.0, 1.0, 1.0];
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), HrvOptions::default());
         
         assert_eq!(intervals.len(), 1);
         assert!((intervals[0] - 1100.0).abs() < 0.1);
@@ -476,7 +501,7 @@ mod tests {
         let timestamps = vec![0.0, 1.0, 2.0];
         let confidence = vec![1.0, 0.1, 1.0]; 
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), HrvOptions::default());
         
         assert_eq!(intervals.len(), 0);
     }
@@ -496,7 +521,7 @@ mod tests {
         let timestamps: Vec<f64> = (0..8).map(|i| i as f64).collect();
         let confidence = vec![1.0; 8];
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), HrvOptions::default());
         
         assert_eq!(intervals.len(), 2);
         assert!((intervals[0] - 1000.0).abs() < 0.1);
@@ -524,7 +549,7 @@ mod tests {
         let mut opts = HrvOptions::default();
         opts.fs_fallback = 10.0;
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, opts);
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), opts);
 
         assert_eq!(intervals.len(), 1);
         assert!((intervals[0] - 1000.0).abs() < 0.1);
@@ -543,7 +568,7 @@ mod tests {
         let mut opts = HrvOptions::default();
         opts.fs_fallback = 10.0;
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, opts);
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), opts);
 
         assert_eq!(intervals.len(), 1);
         assert!((intervals[0] - 980.0).abs() < 0.1);
@@ -551,7 +576,7 @@ mod tests {
 
     #[test]
     fn test_empty_and_single_sequences() {
-        let (intervals, _) = extract_nn_intervals(&[], &[], &[], HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&[], None, None, HrvOptions::default());
         assert!(intervals.is_empty());
 
         let seq = vec![Peak { index: 0, x: 0.0, y: 1.0 }];
@@ -559,7 +584,7 @@ mod tests {
         let timestamps = vec![0.0];
         let confidence = vec![1.0];
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), HrvOptions::default());
         assert!(intervals.is_empty());
     }
 
@@ -573,7 +598,7 @@ mod tests {
         let timestamps = vec![1.0, 1.0]; 
         let confidence = vec![1.0, 1.0];
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, HrvOptions::default());
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), HrvOptions::default());
 
         assert!(intervals.is_empty());
     }
@@ -591,7 +616,7 @@ mod tests {
         let mut opts = HrvOptions::default();
         opts.fs_fallback = 1.0; 
 
-        let (intervals, _) = extract_nn_intervals(&sequences, &timestamps, &confidence, opts);
+        let (intervals, _) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), opts);
 
         assert_eq!(intervals.len(), 1);
         assert!((intervals[0] - 5000.0).abs() < 0.1);
@@ -612,7 +637,7 @@ mod tests {
         let mut opts = HrvOptions::default();
         opts.confidence_threshold = 0.5;
 
-        let (intervals, min_conf) = extract_nn_intervals(&sequences, &timestamps, &confidence, opts);
+        let (intervals, min_conf) = extract_nn_intervals(&sequences, Some(&timestamps), Some(&confidence), opts);
 
         assert_eq!(intervals.len(), 2); 
         assert!((min_conf - 0.6).abs() < 0.001);
@@ -753,5 +778,75 @@ mod tests {
         
         assert!(final_conf < 1.0);
         assert!((final_conf - avg_conf).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_estimate_hrv_from_detections_minimal_none() {
+        // Test with None for timestamps and confidence
+        // 1Hz signal, peaks at indices 0, 1, 2 -> 1000ms intervals
+        let seq = vec![
+            Peak { index: 0, x: 0.0, y: 1.0 },
+            Peak { index: 1, x: 1.0, y: 1.0 },
+            Peak { index: 2, x: 2.0, y: 1.0 },
+        ];
+        
+        let (val, conf) = estimate_hrv_from_detections(
+            &[seq], 
+            1.0, // fs_fallback
+            crate::registry::HrvMetric::Sdnn, 
+            None, 
+            None
+        );
+
+        assert_eq!(val, 0.0); // Perfect 1000ms intervals = 0 SDNN
+        assert_eq!(conf, 1.0); // Default confidence when None provided
+    }
+
+    #[test]
+    fn test_estimate_hrv_from_detections_with_provided_confidence() {
+        let seq = vec![
+            Peak { index: 0, x: 0.0, y: 1.0 },
+            Peak { index: 1, x: 1.0, y: 1.0 },
+        ];
+        
+        // Confidence slice provided
+        let confidence = vec![1.0, 0.7];
+        
+        let (_, conf) = estimate_hrv_from_detections(
+            &[seq], 
+            1.0, 
+            crate::registry::HrvMetric::Sdnn, 
+            None, 
+            Some(&confidence)
+        );
+
+        // Logic should pick the minimum confidence of the peaks used
+        assert!((conf - 0.7).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_estimate_hrv_from_detections_with_provided_timestamps() {
+        let seq = vec![
+            Peak { index: 0, x: 0.0, y: 1.0 },
+            Peak { index: 1, x: 1.0, y: 1.0 },
+            Peak { index: 2, x: 2.0, y: 1.0 },
+        ];
+        
+        // Interval 1: 1.0s (1000ms)
+        // Interval 2: 1.1s (1100ms)
+        // Change is 10%, which passes the 25% outlier threshold.
+        let timestamps = vec![0.0, 1.0, 2.1]; 
+        
+        let (val, _) = estimate_hrv_from_detections(
+            &[seq], 
+            10.0, 
+            crate::registry::HrvMetric::Rmssd, 
+            Some(&timestamps), 
+            None
+        );
+
+        // Successive difference = 1100 - 1000 = 100ms
+        // RMSSD = sqrt(100^2 / 1) = 100.0
+        assert!((val - 100.0).abs() < 0.1, "Expected RMSSD 100.0, got {}", val);
     }
 }

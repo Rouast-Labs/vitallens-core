@@ -60,6 +60,38 @@ impl Default for PeakOptions {
     }
 }
 
+/// Resolves the continuous timestamp of a sub-sample peak location.
+///
+/// # Arguments
+/// * `p` - The detected peak containing the integer index and sub-sample float index (`x`).
+/// * `timestamps` - A slice of precise frame timestamps.
+/// * `fs_fallback` - The sampling frequency to use if timestamps are unavailable.
+///
+/// # Returns
+/// The resolved time in seconds as an `f64`.
+pub fn resolve_time(p: &Peak, timestamps: &[f64], fs_fallback: f32) -> f64 {
+    if timestamps.is_empty() {
+        return p.x as f64 / fs_fallback as f64;
+    }
+
+    let floor_idx = p.x.floor().max(0.0) as usize;
+    let ceil_idx = floor_idx + 1;
+
+    if ceil_idx < timestamps.len() {
+        let t_floor = timestamps[floor_idx];
+        let t_ceil = timestamps[ceil_idx];
+        let fraction = p.x - floor_idx as f32;
+        
+        t_floor + (t_ceil - t_floor) * fraction as f64
+    } else if floor_idx < timestamps.len() {
+        let t_floor = timestamps[floor_idx];
+        let fraction = p.x - floor_idx as f32;
+        t_floor + (fraction as f64 / fs_fallback as f64)
+    } else {
+        p.x as f64 / fs_fallback as f64
+    }
+}
+
 /// Computes local rolling statistics (mean and standard deviation) for adaptive thresholding.
 /// Optionally applies low-pass smoothing to the input signal prior to calculation.
 ///
@@ -667,5 +699,53 @@ mod tests {
         
         assert_eq!(segments.len(), 1);
         assert!(segments[0].len() >= 9);
+    }
+
+    #[test]
+    fn test_resolve_time_interpolates() {
+        let p = Peak { index: 1, x: 1.5, y: 1.0 };
+        let timestamps = vec![0.0, 1.0, 3.0, 4.0];
+        let time = resolve_time(&p, &timestamps, 30.0);
+        assert!((time - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_resolve_time_exact_index() {
+        let p = Peak { index: 2, x: 2.0, y: 1.0 };
+        let timestamps = vec![0.0, 1.1, 2.2, 3.3];
+        let time = resolve_time(&p, &timestamps, 30.0);
+        assert!((time - 2.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_resolve_time_fallback_to_fs() {
+        let p = Peak { index: 15, x: 15.5, y: 1.0 };
+        let timestamps: Vec<f64> = vec![];
+        let time = resolve_time(&p, &timestamps, 10.0);
+        assert!((time - 1.55).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_resolve_time_at_upper_boundary() {
+        let p = Peak { index: 2, x: 2.5, y: 1.0 };
+        let timestamps = vec![0.0, 1.0, 2.0];
+        let time = resolve_time(&p, &timestamps, 10.0);
+        assert!((time - 2.05).abs() < 1e-6, "Expected 2.05, got {}", time);
+    }
+
+    #[test]
+    fn test_resolve_time_out_of_bounds_completely() {
+        let p = Peak { index: 5, x: 5.5, y: 1.0 };
+        let timestamps = vec![0.0, 1.0, 2.0];
+        let time = resolve_time(&p, &timestamps, 10.0);
+        assert!((time - 0.55).abs() < 1e-6, "Expected 0.55, got {}", time);
+    }
+
+    #[test]
+    fn test_resolve_time_left_shifted_peak_with_jitter() {
+        let p = Peak { index: 4, x: 3.8, y: 1.0 };
+        let timestamps = vec![0.0, 1.0, 2.0, 3.0, 4.5, 5.0];
+        let time = resolve_time(&p, &timestamps, 30.0);
+        assert!((time - 4.2).abs() < 1e-6, "Expected 4.2, got {}", time);
     }
 }
