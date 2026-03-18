@@ -86,7 +86,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
     match vital_id {
 
         // PPG Waveform
-        "ppg_waveform" | "ppg" => Some(VitalMeta {
+        "ppg_waveform" | "ppg" | "ppg_ir" => Some(VitalMeta {
             id: "ppg_waveform".to_string(),
             vital_type: VitalType::Provided,
             derivations: vec![],
@@ -122,7 +122,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
         }),
 
         // Heart Rate
-        "heart_rate" | "hr" | "pulse" => Some(VitalMeta {
+        "heart_rate" | "hr" | "hr_ppg" | "pulse" => Some(VitalMeta {
             id: "heart_rate".to_string(),
             vital_type: VitalType::Derived,
             derivations: vec![DerivationConfig {

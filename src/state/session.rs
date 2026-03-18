@@ -134,10 +134,14 @@ impl SessionCore {
     /// Appends new signal vectors into their respective running buffers using the calculated overlap.
     fn merge_signals(&mut self, signals: HashMap<String, SignalInput>, overlap: usize) {
         for (key, input) in signals {
-            let data_buf = self.signal_data.entry(key.clone()).or_insert_with(SignalBuffer::new);
+            let canon_key = registry::get_vital_meta(&key)
+                .map(|meta| meta.id)
+                .unwrap_or(key);
+
+            let data_buf = self.signal_data.entry(canon_key.clone()).or_insert_with(SignalBuffer::new);
             data_buf.merge(&input.data, overlap, Some("unitless".to_string()));
 
-            let conf_buf = self.signal_confs.entry(key).or_insert_with(SignalBuffer::new);
+            let conf_buf = self.signal_confs.entry(canon_key).or_insert_with(SignalBuffer::new);
             conf_buf.merge(&input.confidence, overlap, None);
         }
     }
@@ -602,7 +606,7 @@ impl SessionCore {
         for vital_id in return_waveforms {
             if let Some(meta) = registry::get_vital_meta(&vital_id) {
                 if let VitalType::Provided = meta.vital_type {
-                    if let Some(buf) = self.signal_data.get(&vital_id) {
+                    if let Some(buf) = self.signal_data.get(&meta.id) {
                         let full_data = buf.compute_average();
                         
                         let processed_data = if let Some(proc_cfg) = &meta.processing {
@@ -637,7 +641,7 @@ impl SessionCore {
                                 format!("Latest estimate of {} with frame-wise confidence scores using {}.", meta.display_name, self.config.model_name)
                             };
 
-                            waveforms_out.insert(vital_id.clone(), WaveformResult {
+                            waveforms_out.insert(meta.id.clone(), WaveformResult {
                                 data: waveform_data,
                                 confidence: waveform_conf,
                                 unit: meta.unit.clone(),
