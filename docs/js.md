@@ -1,115 +1,82 @@
-# Python Integration Guide
+# JavaScript Integration Guide
 
-In Python, `vitallens-core` operates as a native C-extension via PyO3. It is used in two primary ways: high-performance stateful sessions for streaming applications, and stateless, direct mathematical operations for research scripts.
+`vitallens-core` is compiled to WebAssembly (Wasm) via `wasm-pack`. It provides high-performance signal processing for web-based rPPG applications.
 
 ## Get the Artifacts
 
-Build and install the Python bindings directly into your active virtual environment (see [`CONTRIBUTING.md`](../CONTRIBUTING.md) for full setup instructions):
+Build the Wasm package locally:
 
 ```bash
-# Fast local install for development
-maturin develop --features python
-
-# Or build the release wheel via Makefile
-make build-python
+make build-web
 ```
 
-## Stateful Usage (Streaming & Apps)
+This generates the `pkg/` directory containing the `.wasm` binary and the generated JS/TS glue code.
 
-Use the `Session` object to manage overlapping frame buffers, history, and real-time computation in a backend or desktop app.
+## Integration
 
-```python
-import vitallens_core as vc
+### 1. Initialization
+In a modern JS environment (e.g., React, Vue, or vanilla ESM), import and initialize the module:
 
-# 1. Configuration
-config = vc.SessionConfig(
-    model_name="vitallens-2.0",
-    supported_vitals=["heart_rate", "hrv_rmssd"],
-    fps_target=30.0,
-    input_size=100,
-    n_inputs=10,
-    roi_method="face",
-    return_waveforms=["ppg_waveform"]
-)
-session = vc.Session(config)
+```javascript
+import init, { Session, SessionConfig, getVitalInfo } from './pkg/vitallens_core.js';
 
-# 2. Construct inputs
-ppg_signal = vc.SignalInput(
-    data=[0.1, 0.2, 0.3], 
-    confidence=[1.0, 1.0, 1.0]
-)
-
-face_input = vc.FaceInput(
-    coordinates=[[0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5], [0.1, 0.1, 0.5, 0.5]],
-    confidence=[0.9, 0.9, 0.9]
-)
-
-input_data = vc.SessionInput(
-    face=face_input,
-    signals={"ppg_waveform": ppg_signal},
-    timestamp=[1.0, 1.033, 1.066]
-)
-
-# 3. Process incrementally
-result = session.process(input_data, mode="Incremental")
-
-if "heart_rate" in result.vitals:
-    print(f"HR: {result.vitals['heart_rate'].value} BPM")
+async function setup() {
+    await init(); // Load the Wasm binary
+}
 ```
 
-## Stateless Usage (Research & Scripts)
+### 2. Stateful Usage (Streaming)
+The `Session` object manages frame buffers and state natively in Wasm.
 
-The library exposes individual signal processing functions. These take `numpy` arrays directly and are useful for evaluating metrics on complete, pre-extracted signals.
+```javascript
+const config = {
+    model_name: "vitallens-2.0",
+    supported_vitals: ["heart_rate", "respiratory_rate"],
+    fps_target: 30.0,
+    input_size: 100,
+    n_inputs: 5,
+    roi_method: "face",
+    return_waveforms: ["ppg_waveform"]
+};
 
-```python
-import numpy as np
-import vitallens_core as vc
+const session = new Session(config);
 
-fs = 30.0
-signal = np.sin(np.linspace(0, 10 * 2 * np.pi, 300)).astype(np.float32)
-confidence = np.ones_like(signal).astype(np.float32)
+// Inside your camera/processing loop
+function onInferenceResult(mlOutput) {
+    const input = {
+        face: {
+            coordinates: [[0.1, 0.1, 0.5, 0.5]],
+            confidence: [0.98]
+        },
+        signals: {
+            "ppg_waveform": {
+                data: mlOutput.ppg,
+                confidence: mlOutput.conf
+            }
+        },
+        timestamp: [performance.now() / 1000]
+    };
 
-# Rate estimation
-hr_val, hr_conf = vc.estimate_heart_rate(signal, fs)
-print(f"Heart Rate: {hr_val:.1f} BPM (Confidence: {hr_conf:.2f})")
+    // Process in "Incremental" mode to get only new frames
+    const result = session.processJs(input, "Incremental");
 
-# HRV estimation
-# Supported metrics: sdnn, rmssd, lfhf, si, pnn50, sd1sd2
-sdnn_val, sdnn_conf = vc.estimate_hrv_metric(
-    signal, 
-    fs, 
-    metric_name="sdnn", 
-    confidence=confidence, 
-    rate_hint=hr_val
-)
-print(f"SDNN: {sdnn_val:.1f} ms")
-
-# Peak detection
-peaks = vc.find_peaks(
-    signal=signal,
-    fs=fs,
-    refine=True,
-    rate_hint=hr_val,
-    min_rate=40.0,
-    max_rate=220.0,
-    detection_threshold=0.45,
-    window_cycles=2.5,
-    max_rate_change=1.0
-)
-print(f"Detected {len(peaks)} peaks at indices: {peaks[:3]}...")
-
-# Geometry & ROI
-face_rect = vc.Rect(100.0, 100.0, 80.0, 120.0)
-roi = vc.calculate_roi(
-    face=face_rect, 
-    method="upper_body", 
-    detector="default", 
-    container=(1920.0, 1080.0),
-    force_even=True
-)
-print(f"Calculated ROI: x={roi.x}, y={roi.y}, w={roi.width}, h={roi.height}")
-
-# Metadata
-meta = vc.get_vital_info("heart_rate")
-print(f"Vital ID: {meta.id}, Display Name: {meta.display_name}, Unit: {meta.unit}")
+    if (result.vitals.heart_rate) {
+        console.log(`HR: ${result.vitals.heart_rate.value.toFixed(1)} BPM`);
+    }
+}
 ```
+
+### 3. Utility Functions
+Access metadata and geometry helpers directly:
+
+```javascript
+import { calculateRoi } from './pkg/vitallens_core.js';
+
+const faceRect = { x: 100, y: 100, width: 80, height: 120 };
+const roi = calculateRoi(faceRect, "forehead", "default", 1920, 1080, true);
+```
+
+## Data Structures
+
+* **SessionResult**: Returns `waveforms` and `vitals` as Objects (Maps).
+* **Performance**: To minimize overhead, ensure input arrays are standard JS `Float32Array` or regular arrays; the Wasm glue layer handles the memory conversion.
