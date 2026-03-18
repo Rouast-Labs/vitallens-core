@@ -346,7 +346,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
         }),
 
         // Arterial Blood Pressure Waveform
-        "abp_waveform" => Some(VitalMeta {
+        "abp_waveform" | "abp" => Some(VitalMeta {
             id: "abp_waveform".to_string(),
             vital_type: VitalType::Provided,
             derivations: vec![],
@@ -497,6 +497,60 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             short_name: "PP".to_string(),
             color: "#7B61FF".to_string(),
             emoji: "🩸".to_string(),
+        }),
+
+        // Pulse wave arrival (PWA)
+        "pwa" => Some(VitalMeta {
+            id: "pwa".to_string(),
+            vital_type: VitalType::Provided,
+            derivations: vec![],
+            processing: Some(ProcessingConfig {
+                operation: PostProcessOp::None,
+                min_window_seconds: 5.0,
+                min_freq: None,
+                max_freq: None,
+            }),
+            unit: "unitless".to_string(),
+            display_name: "PWA".to_string(),
+            short_name: "PWA".to_string(),
+            color: "#E62100".to_string(),
+            emoji: "❤️".to_string(),
+        }),
+
+        // Pulse wave peak (PWP)
+        "pwp" => Some(VitalMeta {
+            id: "pwp".to_string(),
+            vital_type: VitalType::Provided,
+            derivations: vec![],
+            processing: Some(ProcessingConfig {
+                operation: PostProcessOp::None,
+                min_window_seconds: 5.0,
+                min_freq: None,
+                max_freq: None,
+            }),
+            unit: "unitless".to_string(),
+            display_name: "PWP".to_string(),
+            short_name: "PWP".to_string(),
+            color: "#E62100".to_string(),
+            emoji: "❤️".to_string(),
+        }),
+
+        // Pulse wave velocity (PWV)
+         "pwv" => Some(VitalMeta {
+            id: "pwv".to_string(),
+            vital_type: VitalType::Provided,
+            derivations: vec![],
+            processing: Some(ProcessingConfig {
+                operation: PostProcessOp::None,
+                min_window_seconds: 5.0,
+                min_freq: None,
+                max_freq: None,
+            }),
+            unit: "cm/ms".to_string(),
+            display_name: "PWV".to_string(),
+            short_name: "PWV".to_string(),
+            color: "#E62100".to_string(),
+            emoji: "❤️".to_string(),
         }),
 
         _ => None
