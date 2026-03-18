@@ -1,12 +1,47 @@
 use rustfft::{FftPlanner, num_complex::Complex};
 
 /// Reusable scratchpad for FFT calculations to minimize memory allocations across continuous frames.
-#[derive(Debug, Default, Clone)]
 pub struct FftScratch {
     pub windowed: Vec<f32>,
     pub complex_buffer: Vec<Complex<f32>>,
     pub frequencies: Vec<f32>,
     pub power: Vec<f32>,
+    pub planner: FftPlanner<f32>,
+}
+
+impl Default for FftScratch {
+    fn default() -> Self {
+        Self {
+            windowed: Vec::new(),
+            complex_buffer: Vec::new(),
+            frequencies: Vec::new(),
+            power: Vec::new(),
+            planner: FftPlanner::new(),
+        }
+    }
+}
+
+impl Clone for FftScratch {
+    fn clone(&self) -> Self {
+        Self {
+            windowed: self.windowed.clone(),
+            complex_buffer: self.complex_buffer.clone(),
+            frequencies: self.frequencies.clone(),
+            power: self.power.clone(),
+            planner: FftPlanner::new(),
+        }
+    }
+}
+
+impl std::fmt::Debug for FftScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FftScratch")
+            .field("windowed_len", &self.windowed.len())
+            .field("complex_buffer_len", &self.complex_buffer.len())
+            .field("frequencies_len", &self.frequencies.len())
+            .field("power_len", &self.power.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl FftScratch {
@@ -67,8 +102,7 @@ pub fn compute_periodogram(
     }
     scratch.complex_buffer.resize(fft_len, Complex::new(0.0, 0.0));
 
-    let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(fft_len);
+    let fft = scratch.planner.plan_fft_forward(fft_len);
     fft.process(&mut scratch.complex_buffer);
 
     let num_bins = fft_len / 2;
