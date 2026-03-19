@@ -8,7 +8,7 @@ use crate::registry::HrvMetric;
 use crate::signal::peaks::{self, PeakOptions, SignalBounds};
 use crate::geometry::roi;
 use crate::types::{Rect, RoiMethod, FaceDetector};
-use crate::types::VitalDisplayMeta;
+use crate::types::VitalInfo;
 use crate::state::frames::compute_buffer_config;
 
 pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -206,7 +206,7 @@ fn calculate_roi(
 }
 
 #[pyfunction]
-fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalDisplayMeta>> {
+fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalInfo>> {
     Ok(crate::get_vital_info(vital_id.to_string()))
 }
 

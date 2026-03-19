@@ -6,20 +6,30 @@ pub mod geometry;
 mod bindings;
 
 pub use state::session::Session;
-pub use types::{SessionConfig, SessionInput, WaveformMode, SessionResult, VitalDisplayMeta};
+pub use types::{SessionConfig, SessionInput, WaveformMode, SessionResult, VitalInfo};
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
 #[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
-pub fn get_vital_info(vital_id: String) -> Option<VitalDisplayMeta> {
-    registry::get_vital_meta(&vital_id).map(|meta| VitalDisplayMeta {
-        id: meta.id,
-        display_name: meta.display_name,
-        short_name: meta.short_name,
-        unit: meta.unit,
-        color: meta.color,
-        emoji: meta.emoji,
+pub fn get_vital_info(vital_id: String) -> Option<VitalInfo> {
+    registry::get_vital_meta(&vital_id).map(|meta| {
+        let (min_val, max_val, min_win, pref_win) = meta.derivations.first()
+            .map(|d| (Some(d.min_value), Some(d.max_value), Some(d.min_window_seconds), Some(d.preferred_window_seconds)))
+            .unwrap_or((None, None, None, None));
+
+        VitalInfo {
+            id: meta.id,
+            display_name: meta.display_name,
+            short_name: meta.short_name,
+            unit: meta.unit,
+            color: meta.color,
+            emoji: meta.emoji,
+            min_value: min_val,
+            max_value: max_val,
+            min_window_seconds: min_win,
+            preferred_window_seconds: pref_win,
+        }
     })
 }
 
@@ -58,7 +68,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<types::BufferMetadata>()?;
     m.add_class::<types::InferenceCommand>()?;
     m.add_class::<types::ExecutionPlan>()?;    
-    m.add_class::<types::VitalDisplayMeta>()?;
+    m.add_class::<types::VitalInfo>()?;
     m.add_class::<state::frames::BufferPlanner>()?;
 
     bindings::python::register_functions(m)?;

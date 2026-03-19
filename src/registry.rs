@@ -1,5 +1,7 @@
 use crate::signal::rate::RateStrategy;
 
+//  TODO: Might have to adjust BP, PWV values?
+
 /// Differentiates between raw signals provided by the model and metrics derived from them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VitalType {

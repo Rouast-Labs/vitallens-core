@@ -311,13 +311,17 @@ pub struct SessionResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "python", pyclass(get_all, set_all))]
 #[cfg_attr(not(target_arch = "wasm32"), derive(uniffi::Record))]
-pub struct VitalDisplayMeta {
+pub struct VitalInfo {
     pub id: String,
     pub display_name: String,
     pub short_name: String,
     pub unit: String,
     pub color: String,
     pub emoji: String,
+    pub min_value: Option<f32>,
+    pub max_value: Option<f32>,
+    pub min_window_seconds: Option<f32>,
+    pub preferred_window_seconds: Option<f32>,
 }
 
 // --- PYTHON CONSTRUCTORS ---
@@ -401,8 +405,8 @@ impl Rect {
 
 #[cfg(feature = "python")]
 #[pymethods]
-impl VitalDisplayMeta {
+impl VitalInfo {
     fn __repr__(&self) -> String {
-        format!("VitalDisplayMeta(id='{}', name='{}')", self.id, self.display_name)
+        format!("VitalInfo(id='{}', name='{}')", self.id, self.display_name)
     }
 }
