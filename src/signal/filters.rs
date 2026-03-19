@@ -29,13 +29,13 @@ pub fn apply_processing(
         },
         crate::registry::PostProcessOp::MovingAverage => {
             let cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
-            let window = estimate_moving_average_window(fs, cutoff, true);
+            let window = moving_average_window_for_cutoff(fs, cutoff, true);
             moving_average(signal, window)
         },
         crate::registry::PostProcessOp::Standardize => standardize(signal),
         crate::registry::PostProcessOp::MovingAverageStandardize => {
             let cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
-            let window = estimate_moving_average_window(fs, cutoff, true);
+            let window = moving_average_window_for_cutoff(fs, cutoff, true);
             let smoothed = moving_average(signal, window);
             standardize(&smoothed)
         },
@@ -43,7 +43,7 @@ pub fn apply_processing(
             let hp_cutoff = min_freq.unwrap_or(DEFAULT_HP_CUTOFF);
             let detrended = detrend(signal, fs, hp_cutoff);
             let lp_cutoff = max_freq.unwrap_or(DEFAULT_LP_CUTOFF);
-            let window = estimate_moving_average_window(fs, lp_cutoff, true);
+            let window = moving_average_window_for_cutoff(fs, lp_cutoff, true);
             let smoothed = moving_average(&detrended, window);
             standardize(&smoothed)
         },
@@ -88,7 +88,7 @@ pub fn moving_average(signal: &[f32], window_size: usize) -> Vec<f32> {
 ///
 /// # Returns
 /// The estimated window size in number of frames.
-pub fn estimate_moving_average_window(fs: f32, cutoff_hz: f32, force_odd: bool) -> usize {
+pub fn moving_average_window_for_cutoff(fs: f32, cutoff_hz: f32, force_odd: bool) -> usize {
     if fs <= 0.0 || cutoff_hz <= 0.0 {
         return 1;
     }
@@ -337,8 +337,8 @@ mod tests {
     #[test]
     fn test_estimate_window_inverse_relationship() {
         let fs = 30.0;
-        let w_high_cutoff = estimate_moving_average_window(fs, 5.0, true);
-        let w_low_cutoff = estimate_moving_average_window(fs, 1.0, true);
+        let w_high_cutoff = moving_average_window_for_cutoff(fs, 5.0, true);
+        let w_low_cutoff = moving_average_window_for_cutoff(fs, 1.0, true);
         
         assert!(w_low_cutoff > w_high_cutoff, 
             "Lower cutoff (1Hz) should require larger window than high cutoff (5Hz)");
@@ -347,8 +347,8 @@ mod tests {
     #[test]
     fn test_estimate_window_fs_relationship() {
         let cutoff = 2.0;
-        let w_high_fs = estimate_moving_average_window(60.0, cutoff, true);
-        let w_low_fs = estimate_moving_average_window(30.0, cutoff, true);
+        let w_high_fs = moving_average_window_for_cutoff(60.0, cutoff, true);
+        let w_low_fs = moving_average_window_for_cutoff(30.0, cutoff, true);
 
         assert!(w_high_fs > w_low_fs,
             "Higher sampling rate should require more samples for same cutoff");
@@ -356,13 +356,13 @@ mod tests {
 
     #[test]
     fn test_estimate_window_force_odd() {
-        let w = estimate_moving_average_window(30.0, 2.5, true);
+        let w = moving_average_window_for_cutoff(30.0, 2.5, true);
         assert_eq!(w % 2, 1, "Window size must be odd");
     }
 
     #[test]
     fn test_estimate_window_zero_cutoff() {
-        let w = estimate_moving_average_window(30.0, 0.0, false);
+        let w = moving_average_window_for_cutoff(30.0, 0.0, false);
         assert_eq!(w, 1);  
     }
 

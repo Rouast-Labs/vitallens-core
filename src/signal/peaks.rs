@@ -107,7 +107,7 @@ fn compute_statistics(signal: &[f32], options: &PeakOptions) -> StatsResult {
     
     let working_signal: &[f32] = if options.smooth_input {
         let cutoff_hz = options.bounds.max_rate / 60.0;
-        let window = filters::estimate_moving_average_window(options.fs, cutoff_hz, true);
+        let window = filters::moving_average_window_for_cutoff(options.fs, cutoff_hz, true);
         search_radius = window / 2;
         
         smoothed_storage = filters::moving_average(signal, window);

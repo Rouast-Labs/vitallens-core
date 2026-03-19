@@ -21,6 +21,8 @@ pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
     m.add_function(wrap_pyfunction!(py_compute_buffer_config, m)?)?;
+    m.add_function(wrap_pyfunction!(detrend_lambda_for_cutoff, m)?)?;
+    m.add_function(wrap_pyfunction!(moving_average_window_for_cutoff, m)?)?;
     Ok(())
 }
 
@@ -214,4 +216,14 @@ fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalInfo>> {
 #[pyo3(name = "compute_buffer_config")]
 fn py_compute_buffer_config(_py: Python, config: &crate::types::SessionConfig) -> PyResult<crate::types::BufferConfig> {
     Ok(compute_buffer_config(config.clone()))
+}
+
+#[pyfunction]
+fn detrend_lambda_for_cutoff(_py: Python, fs: f32, cutoff: f32) -> PyResult<f32> {
+    Ok(crate::signal::filters::detrend_lambda_for_cutoff(fs, cutoff))
+}
+
+#[pyfunction]
+fn moving_average_window_for_cutoff(_py: Python, fs: f32, cutoff_hz: f32, force_odd: bool) -> PyResult<usize> {
+    Ok(crate::signal::filters::moving_average_window_for_cutoff(fs, cutoff_hz, force_odd))
 }
