@@ -128,6 +128,118 @@ pub fn estimate_rate_from_detections(
     calculate_from_peaks(segments, fs_fallback, timestamps, confidence)
 }
 
+/// Estimates rolling rate from pre-computed peak detection sequences using a time-based window.
+///
+/// # Arguments
+/// * `segments` - A slice of contiguous peak sequences.
+/// * `fs_fallback` - The sampling frequency in Hz.
+/// * `timestamps` - Optional array of frame timestamps in seconds.
+/// * `confidence` - Optional array of confidence scores.
+/// * `min_window_seconds` - Minimum elapsed time required to calculate a valid rate.
+/// * `preferred_window_seconds` - Maximum backward-looking window size in seconds.
+/// * `rolling_stride_seconds` - The stride for the rolling window.
+/// * `total_frames` - The total length of the target output arrays.
+///
+/// # Returns
+/// A tuple containing `(rates, confidences)` aligned to the total frames.
+pub fn estimate_rolling_rate_from_detections(
+    segments: &[Vec<Peak>],
+    fs_fallback: f32,
+    timestamps: Option<&[f64]>,
+    confidence: Option<&[f32]>,
+    min_window_seconds: f32,
+    preferred_window_seconds: f32,
+    rolling_stride_seconds: f32,
+    total_frames: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut out_rates = vec![f32::NAN; total_frames];
+    let mut out_confs = vec![0.0; total_frames];
+    let ts_slice = timestamps.unwrap_or(&[]);
+
+    for segment in segments {
+        if segment.is_empty() {
+            continue;
+        }
+
+        let times: Vec<f64> = segment.iter()
+            .map(|p| crate::signal::peaks::resolve_time(p, ts_slice, fs_fallback))
+            .collect();
+
+        let mut det_rates = Vec::with_capacity(segment.len());
+        let mut det_confs = Vec::with_capacity(segment.len());
+        
+        let mut last_calc_time = -1.0;
+        let mut last_rate = f32::NAN;
+        let mut last_conf = 0.0;
+
+        for i in 0..segment.len() {
+            let t_curr = times[i];
+            let time_in_seq = t_curr - times[0];
+
+            if time_in_seq < min_window_seconds as f64 {
+                det_rates.push(f32::NAN);
+                det_confs.push(0.0);
+                continue;
+            }
+
+            if last_calc_time >= 0.0 && (t_curr - last_calc_time) < rolling_stride_seconds as f64 {
+                det_rates.push(last_rate);
+                det_confs.push(last_conf);
+                continue;
+            }
+
+            let window_start_time = t_curr - preferred_window_seconds as f64;
+            let mut start_idx = 0;
+            while start_idx < i && times[start_idx] < window_start_time {
+                start_idx += 1;
+            }
+
+            let window_slice = &segment[start_idx..=i];
+
+            if window_slice.len() < 2 {
+                det_rates.push(f32::NAN);
+                det_confs.push(0.0);
+                continue;
+            }
+
+            let res = estimate_rate_from_detections(&[window_slice.to_vec()], fs_fallback, timestamps, confidence);
+            
+            last_rate = if res.value > 0.0 { res.value } else { f32::NAN };
+            last_conf = res.confidence;
+            last_calc_time = t_curr;
+            
+            det_rates.push(last_rate);
+            det_confs.push(last_conf);
+        }
+
+        for i in 0..segment.len() {
+            let start_frame = segment[i].index;
+            let end_frame = if i + 1 < segment.len() {
+                segment[i+1].index
+            } else {
+                if segment.len() >= 2 {
+                    let diff = segment[i].index - segment[i-1].index;
+                    (segment[i].index + diff).min(total_frames)
+                } else {
+                    total_frames
+                }
+            };
+
+            let rate = det_rates[i];
+            let conf = det_confs[i];
+
+            for f in start_frame..end_frame {
+                if f < total_frames {
+                    out_rates[f] = rate;
+                    out_confs[f] = conf;
+                }
+            }
+        }
+    }
+
+    (out_rates, out_confs)
+}
+
 /// Calculates the average rate from detected sequences of peaks based on interval distances.
 ///
 /// # Arguments
@@ -319,5 +431,85 @@ mod tests {
         
         assert_eq!(result.value, 60.0);
         assert_eq!(result.confidence, 0.5); 
+    }
+
+    #[test]
+    fn test_estimate_rolling_rate_basic_time_window() {
+        let fs = 10.0;
+        let total_frames = 100;
+        
+        let segment: Vec<Peak> = (0..10).map(|i| p((i * 10) as f32)).collect();
+        
+        let (rates, confs) = estimate_rolling_rate_from_detections(
+            &[segment], fs, None, None, 
+            3.0,
+            5.0,
+            1.0,
+            total_frames
+        );
+
+        assert_eq!(rates.len(), total_frames);
+        assert_eq!(confs.len(), total_frames);
+
+        assert!(rates[29].is_nan());
+        
+        assert!((rates[30] - 60.0).abs() < 0.1);
+        
+        assert!((rates[99] - 60.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_estimate_rolling_rate_stride_logic() {
+        let fs = 10.0;
+        let total_frames = 100;
+        
+        let segment = vec![
+            p(0.0), p(10.0), p(25.0), p(35.0), p(50.0), p(60.0)
+        ];
+
+        let (rates, _) = estimate_rolling_rate_from_detections(
+            &[segment], fs, None, None,
+            2.0,
+            4.0,
+            3.0,
+            total_frames
+        );
+
+        assert!(rates[24].is_nan());
+        assert!(!rates[25].is_nan());
+        
+        let first_calc_rate = rates[25];
+        
+        assert_eq!(rates[35], first_calc_rate);
+        
+        assert!(rates[60] != first_calc_rate && !rates[60].is_nan());
+    }
+
+    #[test]
+    fn test_estimate_rolling_rate_multiple_segments() {
+        let fs = 10.0;
+        let total_frames = 100;
+        
+        let seg1: Vec<Peak> = (0..4).map(|i| p((i * 10) as f32)).collect();
+        
+        let seg2: Vec<Peak> = (0..7).map(|i| p((60 + i * 5) as f32)).collect();
+
+        let (rates, _) = estimate_rolling_rate_from_detections(
+            &[seg1, seg2], fs, None, None,
+            2.0, 5.0, 1.0, total_frames
+        );
+
+        assert!((rates[20] - 60.0).abs() < 0.1);
+
+        assert!((rates[39] - 60.0).abs() < 0.1);
+        assert!(rates[40].is_nan());
+        assert!(rates[50].is_nan());
+        
+        assert!(rates[79].is_nan());
+        assert!((rates[80] - 120.0).abs() < 0.1);
+
+        assert!((rates[94] - 120.0).abs() < 0.1);
+        assert!(rates[95].is_nan());
+        assert!(rates[99].is_nan());
     }
 }

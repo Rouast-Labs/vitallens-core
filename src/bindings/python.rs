@@ -15,8 +15,10 @@ pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(estimate_heart_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_respiratory_rate, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_rate_from_detections, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_rolling_rate_from_detections, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric, m)?)?;
     m.add_function(wrap_pyfunction!(estimate_hrv_metric_from_detections, m)?)?;
+    m.add_function(wrap_pyfunction!(estimate_rolling_hrv_metric_from_detections, m)?)?;
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
@@ -114,6 +116,35 @@ fn estimate_rate_from_detections(
 }
 
 #[pyfunction]
+#[pyo3(signature = (sequences, fs, vital_name, total_frames, timestamps=None, confidence=None))]
+fn estimate_rolling_rate_from_detections(
+    _py: Python,
+    sequences: Vec<Vec<f32>>,
+    fs: f32,
+    vital_name: &str,
+    total_frames: usize,
+    timestamps: Option<Vec<f64>>,
+    confidence: Option<Vec<f32>>,
+) -> PyResult<(Vec<f32>, Vec<f32>)> {
+    let peak_segments = py_seqs_to_peaks(sequences);
+    let ts_slice = timestamps.as_deref();
+    let conf_slice = confidence.as_deref();
+    
+    let meta = crate::registry::get_vital_meta(vital_name)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Unknown vital rate: {}", vital_name)))?;
+        
+    let deriv = meta.derivations.first()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("No derivations found for vital"))?;
+
+    let (rates, confs) = crate::signal::rate::estimate_rolling_rate_from_detections(
+        &peak_segments, fs, ts_slice, conf_slice, 
+        deriv.min_window_seconds, deriv.preferred_window_seconds, deriv.rolling_stride_seconds, total_frames
+    );
+
+    Ok((rates, confs))
+}
+
+#[pyfunction]
 #[pyo3(signature = (sequences, fs, metric_name, timestamps=None, confidence=None))]
 fn estimate_hrv_metric_from_detections(
     _py: Python,
@@ -142,6 +173,45 @@ fn estimate_hrv_metric_from_detections(
     );
 
     Ok((val, conf_out))
+}
+
+#[pyfunction]
+#[pyo3(signature = (sequences, fs, metric_name, total_frames, timestamps=None, confidence=None))]
+fn estimate_rolling_hrv_metric_from_detections(
+    _py: Python,
+    sequences: Vec<Vec<f32>>,
+    fs: f32,
+    metric_name: &str,
+    total_frames: usize,
+    timestamps: Option<Vec<f64>>,
+    confidence: Option<Vec<f32>>,
+) -> PyResult<(Vec<f32>, Vec<f32>)> {
+    let peak_segments = py_seqs_to_peaks(sequences);
+    let ts_slice = timestamps.as_deref();
+    let conf_slice = confidence.as_deref();
+
+    let meta = crate::registry::get_vital_meta(metric_name)
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err(format!("Unknown HRV metric: {}", metric_name)))?;
+        
+    let deriv = meta.derivations.first()
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("No derivations found for metric"))?;
+
+    let metric = match metric_name.to_lowercase().as_str() {
+        "sdnn" | "hrv_sdnn" => HrvMetric::Sdnn,
+        "rmssd" | "hrv_rmssd" => HrvMetric::Rmssd,
+        "lfhf" | "hrv_lfhf" => HrvMetric::LfHf,
+        "si" | "stress_index" => HrvMetric::StressIndex,
+        "pnn50" | "hrv_pnn50" => HrvMetric::Pnn50,
+        "sd1sd2" | "hrv_sd1sd2" => HrvMetric::Sd1Sd2,
+        _ => return Err(pyo3::exceptions::PyValueError::new_err("Invalid HRV metric")),
+    };
+
+    let (vals, confs) = crate::signal::hrv::estimate_rolling_hrv_from_detections(
+        &peak_segments, fs, metric, ts_slice, conf_slice, 
+        deriv.min_window_seconds, deriv.preferred_window_seconds, deriv.rolling_stride_seconds, total_frames
+    );
+
+    Ok((vals, confs))
 }
 
 #[pyfunction]

@@ -128,6 +128,127 @@ pub fn estimate_hrv_from_detections(
     (value, min_conf_peaks)
 }
 
+/// Estimates rolling HRV metric from pre-computed peak detection sequences using a time-based window.
+///
+/// # Arguments
+/// * `sequences` - A slice of contiguous peak sequences.
+/// * `fs_fallback` - The sampling frequency in Hz.
+/// * `metric` - The specific HRV metric to calculate.
+/// * `timestamps` - Optional array of frame timestamps in seconds.
+/// * `confidence` - Optional array of confidence scores.
+/// * `min_window_seconds` - Minimum elapsed time required to calculate a valid metric.
+/// * `preferred_window_seconds` - Maximum backward-looking window size in seconds.
+/// * `rolling_stride_seconds` - The stride for the rolling window.
+/// * `total_frames` - The total length of the target output arrays.
+///
+/// # Returns
+/// A tuple containing `(hrv_values, confidences)` aligned to the total frames.
+pub fn estimate_rolling_hrv_from_detections(
+    sequences: &[Vec<Peak>],
+    fs_fallback: f32,
+    metric: crate::registry::HrvMetric,
+    timestamps: Option<&[f64]>,
+    confidence: Option<&[f32]>,
+    min_window_seconds: f32,
+    preferred_window_seconds: f32,
+    rolling_stride_seconds: f32,
+    total_frames: usize,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut out_vals = vec![f32::NAN; total_frames];
+    let mut out_confs = vec![0.0; total_frames];
+    let ts_slice = timestamps.unwrap_or(&[]);
+
+    for sequence in sequences {
+        if sequence.is_empty() {
+            continue;
+        }
+
+        let times: Vec<f64> = sequence.iter()
+            .map(|p| crate::signal::peaks::resolve_time(p, ts_slice, fs_fallback))
+            .collect();
+
+        let mut det_vals = Vec::with_capacity(sequence.len());
+        let mut det_confs = Vec::with_capacity(sequence.len());
+        
+        let mut last_calc_time = -1.0;
+        let mut last_val = f32::NAN;
+        let mut last_conf = 0.0;
+
+        for i in 0..sequence.len() {
+            let t_curr = times[i];
+            let time_in_seq = t_curr - times[0];
+
+            if time_in_seq < min_window_seconds as f64 {
+                det_vals.push(f32::NAN);
+                det_confs.push(0.0);
+                continue;
+            }
+
+            // Stride logic: skip expensive calc if we haven't crossed the stride threshold
+            if last_calc_time >= 0.0 && (t_curr - last_calc_time) < rolling_stride_seconds as f64 {
+                det_vals.push(last_val);
+                det_confs.push(last_conf);
+                continue;
+            }
+
+            let window_start_time = t_curr - preferred_window_seconds as f64;
+            let mut start_idx = 0;
+            while start_idx < i && times[start_idx] < window_start_time {
+                start_idx += 1;
+            }
+
+            let window_slice = &sequence[start_idx..=i];
+
+            if window_slice.len() < 3 {
+                det_vals.push(f32::NAN);
+                det_confs.push(0.0);
+                continue;
+            }
+
+            let (val, conf) = estimate_hrv_from_detections(
+                &[window_slice.to_vec()],
+                fs_fallback,
+                metric,
+                timestamps,
+                confidence
+            );
+
+            last_val = if val > 0.0 || (val == 0.0 && conf > 0.0) { val } else { f32::NAN };
+            last_conf = conf;
+            last_calc_time = t_curr;
+            
+            det_vals.push(last_val);
+            det_confs.push(last_conf);
+        }
+
+        for i in 0..sequence.len() {
+            let start_frame = sequence[i].index;
+            let end_frame = if i + 1 < sequence.len() {
+                sequence[i+1].index
+            } else {
+                if sequence.len() >= 2 {
+                    let diff = sequence[i].index - sequence[i-1].index;
+                    (sequence[i].index + diff).min(total_frames)
+                } else {
+                    total_frames
+                }
+            };
+
+            let val = det_vals[i];
+            let conf = det_confs[i];
+
+            for f in start_frame..end_frame {
+                if f < total_frames {
+                    out_vals[f] = val;
+                    out_confs[f] = conf;
+                }
+            }
+        }
+    }
+
+    (out_vals, out_confs)
+}
+
 /// Extracts valid Normal-to-Normal (NN) intervals from multiple sequences of peaks.
 /// 
 /// This function prevents "phantom intervals" by only calculating differences within
@@ -782,8 +903,6 @@ mod tests {
 
     #[test]
     fn test_estimate_hrv_from_detections_minimal_none() {
-        // Test with None for timestamps and confidence
-        // 1Hz signal, peaks at indices 0, 1, 2 -> 1000ms intervals
         let seq = vec![
             Peak { index: 0, x: 0.0, y: 1.0 },
             Peak { index: 1, x: 1.0, y: 1.0 },
@@ -792,14 +911,14 @@ mod tests {
         
         let (val, conf) = estimate_hrv_from_detections(
             &[seq], 
-            1.0, // fs_fallback
+            1.0,
             crate::registry::HrvMetric::Sdnn, 
             None, 
             None
         );
 
-        assert_eq!(val, 0.0); // Perfect 1000ms intervals = 0 SDNN
-        assert_eq!(conf, 1.0); // Default confidence when None provided
+        assert_eq!(val, 0.0);
+        assert_eq!(conf, 1.0);
     }
 
     #[test]
@@ -820,7 +939,6 @@ mod tests {
             Some(&confidence)
         );
 
-        // Logic should pick the minimum confidence of the peaks used
         assert!((conf - 0.7).abs() < 1e-6);
     }
 
@@ -832,9 +950,6 @@ mod tests {
             Peak { index: 2, x: 2.0, y: 1.0 },
         ];
         
-        // Interval 1: 1.0s (1000ms)
-        // Interval 2: 1.1s (1100ms)
-        // Change is 10%, which passes the 25% outlier threshold.
         let timestamps = vec![0.0, 1.0, 2.1]; 
         
         let (val, _) = estimate_hrv_from_detections(
@@ -845,8 +960,117 @@ mod tests {
             None
         );
 
-        // Successive difference = 1100 - 1000 = 100ms
-        // RMSSD = sqrt(100^2 / 1) = 100.0
         assert!((val - 100.0).abs() < 0.1, "Expected RMSSD 100.0, got {}", val);
+    }
+
+    // Helper for concise peak creation in tests
+    fn p(x: f32) -> Peak {
+        Peak { index: x as usize, x, y: 1.0 }
+    }
+
+    #[test]
+    fn test_estimate_rolling_hrv_basic_time_window() {
+        let fs = 10.0;
+        let total_frames = 100;
+        
+        // Peaks with alternating intervals: 8 frames (800ms) and 10 frames (1000ms)
+        // Times: 0.0s, 0.8s, 1.8s, 2.6s, 3.6s, 4.4s, 5.4s, 6.2s
+        let peak_indices = vec![0, 8, 18, 26, 36, 44, 54, 62];
+        let segment: Vec<Peak> = peak_indices.into_iter().map(|i| p(i as f32)).collect();
+        
+        let (vals, confs) = estimate_rolling_hrv_from_detections(
+            &[segment], fs, crate::registry::HrvMetric::Rmssd, None, None,
+            2.0, // min_window_seconds
+            5.0, // preferred_window_seconds
+            1.0, // rolling_stride_seconds
+            total_frames
+        );
+
+        assert_eq!(vals.len(), total_frames);
+        assert_eq!(confs.len(), total_frames);
+
+        // Before 2.0 seconds (e.g., peak at 1.8s -> index 18), HRV should be NaN
+        assert!(vals[18].is_nan());
+        assert!(vals[25].is_nan());
+        
+        // At 2.6s (index 26), window is [0, 8, 18, 26]
+        // Intervals: 800, 1000, 800. RMSSD of alternating 800/1000 is exactly 200.0 ms.
+        assert!((vals[26] - 200.0).abs() < 0.1);
+        
+        // Value carries forward to the next peak (index 36)
+        assert!((vals[35] - 200.0).abs() < 0.1);
+        
+        // Last peak is at 62. The last interval was 54 to 62 (8 frames).
+        // So it holds until 62 + 8 = 70. At 70 it drops to NaN.
+        assert!((vals[69] - 200.0).abs() < 0.1);
+        assert!(vals[70].is_nan());
+        assert!(vals[99].is_nan());
+    }
+
+    #[test]
+    fn test_estimate_rolling_hrv_stride_logic() {
+        let fs = 10.0;
+        let total_frames = 100;
+        
+        // Steady rhythm: 0s, 1s, 2s, 3s, 4s, 5s
+        let peak_indices = vec![0, 10, 20, 30, 40, 50];
+        let segment: Vec<Peak> = peak_indices.into_iter().map(|i| p(i as f32)).collect();
+
+        let (vals, _) = estimate_rolling_hrv_from_detections(
+            &[segment], fs, crate::registry::HrvMetric::Sdnn, None, None,
+            2.0, // min_window_seconds
+            5.0, // preferred_window_seconds
+            3.0, // rolling_stride_seconds (large stride)
+            total_frames
+        );
+
+        // First calculation triggers at 2.0s (index 20)
+        assert!(vals[19].is_nan());
+        assert!(!vals[20].is_nan());
+        
+        let first_calc_val = vals[20];
+        
+        // Because the stride is 3.0s, the peaks at 3.0s (idx 30) and 4.0s (idx 40) 
+        // will just hold the exact same value without recalculating.
+        assert_eq!(vals[30], first_calc_val);
+        assert_eq!(vals[40], first_calc_val);
+        
+        // At 5.0s (idx 50), 3.0s have passed since the 2.0s calculation, 
+        // so it recalculates.
+        assert!(!vals[50].is_nan());
+    }
+
+    #[test]
+    fn test_estimate_rolling_hrv_multiple_segments() {
+        let fs = 10.0;
+        let total_frames = 120;
+        
+        // Segment 1: 0s to 3s, steady 10 frames (1s) -> SDNN = 0.0
+        let seg1: Vec<Peak> = (0..4).map(|i| p((i * 10) as f32)).collect();
+        
+        // Segment 2: 6s to 10s, steady 10 frames (1s) -> SDNN = 0.0
+        let seg2: Vec<Peak> = (0..5).map(|i| p((60 + i * 10) as f32)).collect();
+
+        let (vals, _) = estimate_rolling_hrv_from_detections(
+            &[seg1, seg2], fs, crate::registry::HrvMetric::Sdnn, None, None,
+            2.0, 5.0, 1.0, total_frames
+        );
+
+        // Segment 1 becomes valid at 2.0s (index 20)
+        assert!((vals[20] - 0.0).abs() < 0.1);
+        
+        // Segment 1's last peak is at 30, interval is 10. Holds until 40, then NaNs.
+        assert!((vals[39] - 0.0).abs() < 0.1);
+        assert!(vals[40].is_nan());
+        assert!(vals[59].is_nan());
+        
+        // Segment 2 starts at 60, becomes valid at 80 (after 2s).
+        assert!(vals[79].is_nan());
+        assert!((vals[80] - 0.0).abs() < 0.1);
+        
+        // Segment 2's last peak is at 100, interval is 10. Holds until 110, then NaNs.
+        assert!((vals[109] - 0.0).abs() < 0.1);
+        assert!(vals[110].is_nan());
+        assert!(vals[119].is_nan());
     }
 }
