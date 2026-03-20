@@ -1944,30 +1944,38 @@ public func FfiConverterTypeSignalInput_lower(_ value: SignalInput) -> RustBuffe
 /**
  * Extracted UI/display properties for a specific vital sign.
  */
-public struct VitalDisplayMeta {
+public struct VitalInfo {
     public var id: String
     public var displayName: String
     public var shortName: String
     public var unit: String
     public var color: String
     public var emoji: String
+    public var minValue: Float?
+    public var maxValue: Float?
+    public var minWindowSeconds: Float?
+    public var preferredWindowSeconds: Float?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, displayName: String, shortName: String, unit: String, color: String, emoji: String) {
+    public init(id: String, displayName: String, shortName: String, unit: String, color: String, emoji: String, minValue: Float?, maxValue: Float?, minWindowSeconds: Float?, preferredWindowSeconds: Float?) {
         self.id = id
         self.displayName = displayName
         self.shortName = shortName
         self.unit = unit
         self.color = color
         self.emoji = emoji
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.minWindowSeconds = minWindowSeconds
+        self.preferredWindowSeconds = preferredWindowSeconds
     }
 }
 
 
 
-extension VitalDisplayMeta: Equatable, Hashable {
-    public static func ==(lhs: VitalDisplayMeta, rhs: VitalDisplayMeta) -> Bool {
+extension VitalInfo: Equatable, Hashable {
+    public static func ==(lhs: VitalInfo, rhs: VitalInfo) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -1986,6 +1994,18 @@ extension VitalDisplayMeta: Equatable, Hashable {
         if lhs.emoji != rhs.emoji {
             return false
         }
+        if lhs.minValue != rhs.minValue {
+            return false
+        }
+        if lhs.maxValue != rhs.maxValue {
+            return false
+        }
+        if lhs.minWindowSeconds != rhs.minWindowSeconds {
+            return false
+        }
+        if lhs.preferredWindowSeconds != rhs.preferredWindowSeconds {
+            return false
+        }
         return true
     }
 
@@ -1996,6 +2016,10 @@ extension VitalDisplayMeta: Equatable, Hashable {
         hasher.combine(unit)
         hasher.combine(color)
         hasher.combine(emoji)
+        hasher.combine(minValue)
+        hasher.combine(maxValue)
+        hasher.combine(minWindowSeconds)
+        hasher.combine(preferredWindowSeconds)
     }
 }
 
@@ -2003,26 +2027,34 @@ extension VitalDisplayMeta: Equatable, Hashable {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeVitalDisplayMeta: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VitalDisplayMeta {
+public struct FfiConverterTypeVitalInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VitalInfo {
         return
-            try VitalDisplayMeta(
+            try VitalInfo(
                 id: FfiConverterString.read(from: &buf), 
                 displayName: FfiConverterString.read(from: &buf), 
                 shortName: FfiConverterString.read(from: &buf), 
                 unit: FfiConverterString.read(from: &buf), 
                 color: FfiConverterString.read(from: &buf), 
-                emoji: FfiConverterString.read(from: &buf)
+                emoji: FfiConverterString.read(from: &buf), 
+                minValue: FfiConverterOptionFloat.read(from: &buf), 
+                maxValue: FfiConverterOptionFloat.read(from: &buf), 
+                minWindowSeconds: FfiConverterOptionFloat.read(from: &buf), 
+                preferredWindowSeconds: FfiConverterOptionFloat.read(from: &buf)
         )
     }
 
-    public static func write(_ value: VitalDisplayMeta, into buf: inout [UInt8]) {
+    public static func write(_ value: VitalInfo, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.displayName, into: &buf)
         FfiConverterString.write(value.shortName, into: &buf)
         FfiConverterString.write(value.unit, into: &buf)
         FfiConverterString.write(value.color, into: &buf)
         FfiConverterString.write(value.emoji, into: &buf)
+        FfiConverterOptionFloat.write(value.minValue, into: &buf)
+        FfiConverterOptionFloat.write(value.maxValue, into: &buf)
+        FfiConverterOptionFloat.write(value.minWindowSeconds, into: &buf)
+        FfiConverterOptionFloat.write(value.preferredWindowSeconds, into: &buf)
     }
 }
 
@@ -2030,15 +2062,15 @@ public struct FfiConverterTypeVitalDisplayMeta: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVitalDisplayMeta_lift(_ buf: RustBuffer) throws -> VitalDisplayMeta {
-    return try FfiConverterTypeVitalDisplayMeta.lift(buf)
+public func FfiConverterTypeVitalInfo_lift(_ buf: RustBuffer) throws -> VitalInfo {
+    return try FfiConverterTypeVitalInfo.lift(buf)
 }
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeVitalDisplayMeta_lower(_ value: VitalDisplayMeta) -> RustBuffer {
-    return FfiConverterTypeVitalDisplayMeta.lower(value)
+public func FfiConverterTypeVitalInfo_lower(_ value: VitalInfo) -> RustBuffer {
+    return FfiConverterTypeVitalInfo.lower(value)
 }
 
 
@@ -2770,8 +2802,8 @@ fileprivate struct FfiConverterOptionTypeRect: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterOptionTypeVitalDisplayMeta: FfiConverterRustBuffer {
-    typealias SwiftType = VitalDisplayMeta?
+fileprivate struct FfiConverterOptionTypeVitalInfo: FfiConverterRustBuffer {
+    typealias SwiftType = VitalInfo?
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         guard let value = value else {
@@ -2779,13 +2811,13 @@ fileprivate struct FfiConverterOptionTypeVitalDisplayMeta: FfiConverterRustBuffe
             return
         }
         writeInt(&buf, Int8(1))
-        FfiConverterTypeVitalDisplayMeta.write(value, into: &buf)
+        FfiConverterTypeVitalInfo.write(value, into: &buf)
     }
 
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
-        case 1: return try FfiConverterTypeVitalDisplayMeta.read(from: &buf)
+        case 1: return try FfiConverterTypeVitalInfo.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -3092,8 +3124,8 @@ public func computeIou(a: Rect, b: Rect) -> Float {
     )
 })
 }
-public func getVitalInfo(vitalId: String) -> VitalDisplayMeta? {
-    return try!  FfiConverterOptionTypeVitalDisplayMeta.lift(try! rustCall() {
+public func getVitalInfo(vitalId: String) -> VitalInfo? {
+    return try!  FfiConverterOptionTypeVitalInfo.lift(try! rustCall() {
     uniffi_vitallens_core_fn_func_get_vital_info(
         FfiConverterString.lower(vitalId),$0
     )
@@ -3144,7 +3176,7 @@ private var initializationResult: InitializationResult = {
     if (uniffi_vitallens_core_checksum_func_compute_iou() != 42017) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_vitallens_core_checksum_func_get_vital_info() != 12718) {
+    if (uniffi_vitallens_core_checksum_func_get_vital_info() != 31397) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_is_contained() != 26927) {
