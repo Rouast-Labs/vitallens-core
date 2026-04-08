@@ -627,7 +627,7 @@ impl SessionCore {
                         
                         let waveform_data = slice_vec_f32(&processed_data);
                         
-                        let waveform_conf = if let Some(c_buf) = self.signal_confs.get(&vital_id) {
+                        let waveform_conf = if let Some(c_buf) = self.signal_confs.get(&meta.id) {
                             let full_conf = c_buf.compute_average();
                             slice_vec_f32(&full_conf)
                         } else {
