@@ -32,6 +32,8 @@ Ensure Xcode Command Line Tools are installed (required for `lipo` and `xcodebui
 
 ```bash
 rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
+# For Apple Silicon:
+rustup target add wasm32-unknown-unknown
 ```
 
 ## Build & Test Commands
