@@ -41,6 +41,16 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+# Android only. `strip = true` above removes the ELF .symtab, which is the
+# only place uniffi-bindgen looks for the UNIFFI_META_* marker symbols on
+# ELF targets (unlike Mach-O, where they also survive in the exports trie).
+# Stripped Android builds silently produce zero bindings. Keeping symbols
+# here only affects the intermediate AAR's .so size; the consuming app's own
+# release build strips native libraries at final packaging as usual.
+[profile.release-android]
+inherits = "release"
+strip = false
+
 [dev-dependencies]
 env_logger = "0.11.9"
 serde_json = "1.0"

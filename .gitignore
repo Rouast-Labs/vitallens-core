@@ -32,4 +32,12 @@ pkg/
 /bindings/headers/
 /bindings/swift/VitalLensCoreFFI.h
 /bindings/swift/VitalLensCoreFFI.modulemap
+/bindings/kotlin/
 dist/
+
+# Android
+/android/build/
+/android/.gradle/
+/android/.kotlin/
+/android/jniLibs/
+/android/local.properties
