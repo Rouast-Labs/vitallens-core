@@ -1,3 +1,6 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.JavadocJar
+import com.vanniktech.maven.publish.SourcesJar
 import java.io.File
 
 // ==========================================
@@ -17,9 +20,12 @@ val cargoVersion: String = File(rootDir, "../Cargo.toml").readLines()
 // Relies on AGP's built-in Kotlin support to compile the UniFFI-generated
 // Kotlin bindings — do NOT apply org.jetbrains.kotlin.android/jvm alongside
 // com.android.library; as of AGP 9 that combination is a hard build error.
+//
+// com.vanniktech.maven.publish applies/manages `maven-publish` internally —
+// do not additionally apply `id("maven-publish")` alongside it.
 plugins {
     id("com.android.library") version "9.1.1"
-    id("maven-publish")
+    id("com.vanniktech.maven.publish") version "0.37.0"
 }
 
 android {
@@ -44,12 +50,10 @@ android {
         }
     }
 
-    // Required since AGP 7.1+ for the `release` software component to exist —
-    // without this, `components["release"]` below resolves to nothing and
-    // maven-publish silently produces an empty artifact.
-    publishing {
-        singleVariant("release")
-    }
+    // NOTE: no `publishing { singleVariant("release") }` here — the
+    // `AndroidSingleVariantLibrary("release", ...)` config in mavenPublishing{}
+    // below declares that itself. Declaring it in both places is a hard
+    // Gradle error ("...not allowed").
 }
 
 dependencies {
@@ -64,16 +68,63 @@ dependencies {
     api("net.java.dev.jna:jna:5.12.0@aar")
 }
 
-publishing {
-    publications {
-        register<MavenPublication>("release") {
-            groupId = "com.rouast"
-            artifactId = "vitallens-core-android"
-            version = cargoVersion
+// ==========================================
+// Publishing (Maven Central via the Central Portal)
+// ==========================================
 
-            afterEvaluate {
-                from(components["release"])
+mavenPublishing {
+    configure(
+        AndroidSingleVariantLibrary(
+            JavadocJar.Empty(),
+            SourcesJar.Sources(),
+            "release",
+        )
+    )
+    publishToMavenCentral()
+
+    // Only sign when credentials are actually present (in CI, via the
+    // maven-central GitHub Environment's GPG_PRIVATE_KEY/GPG_PASSPHRASE
+    // secrets, exposed as ORG_GRADLE_PROJECT_signingInMemoryKey* env vars).
+    // signAllPublications() unconditionally requires a signatory, which
+    // would otherwise break `make dist-android` -> publishToMavenLocal on a
+    // dev machine that correctly has no GPG key. Gradle auto-exposes any
+    // ORG_GRADLE_PROJECT_x env var as project property `x`, so this single
+    // check covers both the CI (env var) and local (gradle.properties) cases.
+    if (project.hasProperty("signingInMemoryKey")) {
+        signAllPublications()
+    }
+
+    // Coordinate matches the existing PyPI ("vitallens-core") and npm
+    // ("vitallens-core") package names exactly. The artifactId is a literal
+    // string here — deliberately not derived from project.name/rootProject.name
+    // (which stays "vitallens-core-android", the Gradle module folder name) —
+    // so a folder rename can never silently change the published coordinate.
+    coordinates("com.rouast", "vitallens-core", cargoVersion)
+
+    pom {
+        name.set("VitalLens Core")
+        description.set("The universal Rust engine powering the VitalLens ecosystem.")
+        url.set("https://github.com/Rouast-Labs/vitallens-core")
+
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
             }
+        }
+
+        developers {
+            developer {
+                id.set("rouast-labs")
+                name.set("Rouast Labs")
+                url.set("https://github.com/Rouast-Labs")
+            }
+        }
+
+        scm {
+            url.set("https://github.com/Rouast-Labs/vitallens-core")
+            connection.set("scm:git:git://github.com/Rouast-Labs/vitallens-core.git")
+            developerConnection.set("scm:git:ssh://git@github.com/Rouast-Labs/vitallens-core.git")
         }
     }
 }
