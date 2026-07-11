@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - 'v*'
+  # Lets android-release be manually dry-run (build only — its publish step
+  # is skipped on this trigger, see the `if:` condition below) without a
+  # real version tag. The other three jobs are guarded to never run on this
+  # trigger, since npm/PyPI publishes are just as irreversible as a real
+  # tag push.
+  workflow_dispatch:
 
 jobs:
   npm-release:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +35,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   python-release:
+    if: github.event_name == 'push'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -58,6 +66,7 @@ jobs:
           path: dist
 
   publish-pypi:
+    if: github.event_name == 'push'
     needs: python-release
     runs-on: ubuntu-latest
     environment: pypi
@@ -74,8 +83,11 @@ jobs:
 
   android-release:
     runs-on: ubuntu-latest
-    # Pauses for manual approval (required reviewer) before secrets resolve
-    # or any step runs — see the maven-central GitHub Environment settings.
+    # Pauses for manual approval (required reviewer) before any step runs —
+    # on both a real tag push and a manual dry run (workflow_dispatch), since
+    # this gate doesn't distinguish between them. What keeps a dry run from
+    # actually publishing is the `if:` on the "Publish to Maven Central" step
+    # below, not this approval.
     environment: maven-central
     steps:
       - uses: actions/checkout@v4
@@ -102,6 +114,10 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       - name: Publish to Maven Central
+        # Skipped on a manual workflow_dispatch dry run — only a real tag
+        # push actually reaches Maven Central. See the note on the job's
+        # `environment:` above for what does and doesn't gate this.
+        if: github.event_name == 'push'
         run: cd android && ./gradlew publishAndReleaseToMavenCentral
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
