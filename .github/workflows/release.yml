@@ -118,17 +118,14 @@ jobs:
         # push actually reaches Maven Central. See the note on the job's
         # `environment:` above for what does and doesn't gate this.
         if: github.event_name == 'push'
-        # --no-daemon: the previous step already started a Gradle daemon
-        # (make build-android -> ./gradlew assembleRelease) without these
-        # secrets in its environment. Gradle reuses a running daemon by
-        # default regardless of env var changes since it started, so this
-        # step would otherwise silently sign with an empty/missing key
-        # ("Cannot query the value of this provider because it has no value
-        # available"). Forcing a fresh JVM here guarantees it sees the
-        # current environment.
+        # --no-daemon: keeps this invocation isolated from the previous step's daemon.
+        # signingInMemoryKeyId is required because GPG_PRIVATE_KEY was exported via
+        # `gpg --export-secret-subkeys`, which Gradle's signing plugin can't
+        # disambiguate without an explicit key ID (short form, 0x-prefixed).
         run: cd android && ./gradlew publishAndReleaseToMavenCentral --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.GPG_KEY_ID }}
