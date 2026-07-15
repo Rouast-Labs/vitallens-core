@@ -1,4 +1,4 @@
-.PHONY: default check test check-python check-apple check-web build build-python build-apple build-web dist-apple dist-web dist-python version-patch version-minor version-major _commit_version clean
+.PHONY: default check test check-python check-apple check-web check-android build build-python build-apple build-web build-android dist-apple dist-web dist-python dist-android version-patch version-minor version-major _commit_version clean
 
 default: check
 
@@ -6,7 +6,7 @@ default: check
 # MINIMAL TIME-INTENSIVE CHECKS
 # ==========================================
 
-check: test check-python check-apple check-web
+check: test check-python check-apple check-web check-android
 	@echo "✅ All fast checks passed!"
 
 test:
@@ -29,11 +29,18 @@ check-web:
 	@echo "🕸️ Checking Wasm compilation..."
 	cargo check --target wasm32-unknown-unknown --no-default-features
 
+check-android:
+	@echo "🤖 Checking Android compilation..."
+	cargo check --target aarch64-linux-android --lib
+	cargo check --target armv7-linux-androideabi --lib
+	cargo check --target x86_64-linux-android --lib
+	cargo check --target i686-linux-android --lib
+
 # ==========================================
 # FULL BUILDS
 # ==========================================
 
-build: build-python build-apple build-web
+build: build-python build-apple build-web build-android
 	@echo "✅ All release builds complete!"
 
 build-python:
@@ -87,6 +94,20 @@ build-web:
 	wasm-pack build --target web --no-default-features
 	@echo "✅ Web Build Complete! -> pkg/"
 
+build-android:
+	@echo "🤖 Building Android Native Libraries..."
+	# Uses the `release-android` profile (see Cargo.toml) instead of --release:
+	# uniffi-bindgen needs the ELF symbol table that `strip = true` removes.
+	cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 -o android/jniLibs build --profile release-android --lib
+	@echo "🔗 Generating Kotlin Bindings..."
+	cargo run --features=uniffi/cli --bin uniffi-bindgen generate \
+		--library target/aarch64-linux-android/release-android/libvitallens_core.so \
+		--language kotlin \
+		--out-dir bindings/kotlin
+	@echo "📦 Assembling AAR..."
+	cd android && ./gradlew assembleRelease
+	@echo "✅ Android Build Complete! -> android/build/outputs/aar/"
+
 # ==========================================
 # DISTRIBUTION TARGETS
 # ==========================================
@@ -110,6 +131,15 @@ dist-python: build-python
 	@echo "🐍 Publishing Python Wheel to PyPI..."
 	maturin publish --release --features python
 	@echo "✅ Published to PyPI."
+
+# NOTE: unlike dist-web (npm) and dist-python (PyPI), dist-android does NOT
+# publish to a remote registry reachable by CI or other developers — it only
+# installs the AAR into the LOCAL Maven cache (~/.m2) for local verification.
+# Wiring up a real remote Maven publish is release automation, out of scope here.
+dist-android: build-android
+	@echo "📦 Publishing AAR to local Maven cache (~/.m2)..."
+	cd android && ./gradlew publishToMavenLocal
+	@echo "✅ Published to LOCAL Maven cache (~/.m2) only — not a remote registry."
 
 # ==========================================
 # VERSIONING WORKFLOW
@@ -148,4 +178,9 @@ clean:
 	cargo clean
 	rm -rf target/
 	rm -rf pkg/
-	rm -rf bindings/
+	# Removes only gitignored/generated content under bindings/ and android/ —
+	# leaves bindings/swift/VitalLensCore.swift alone: it's checked into git
+	# because SPM resolves this repo directly as its source (Package.swift
+	# points `path:` at it), not a downloaded artifact. build-apple always
+	# regenerates it fresh anyway.
+	git clean -fdX -- bindings/ android/

@@ -49,3 +49,19 @@ jobs:
 
       - name: Check Apple Bindings
         run: make check-apple
+
+  android:
+    name: Android Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android, i686-linux-android
+
+      - name: Check Android Bindings
+        run: make check-android

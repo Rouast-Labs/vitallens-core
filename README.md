@@ -19,6 +19,7 @@ This core compiles directly into the native formats required by our clients:
 1. **Apple (iOS/macOS):** Compiled as an `.xcframework` with Swift bindings via UniFFI.
 2. **Web (JavaScript/TypeScript):** Compiled to WebAssembly (`.wasm`) via `wasm-pack`.
 3. **Python:** Compiled as a native Python extension (`.so`) via PyO3 and Maturin.
+4. **Android:** Compiled as an `.aar` with Kotlin bindings via UniFFI and `cargo-ndk`.
 
 ## Integration Guides
 
