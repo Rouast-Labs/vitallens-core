@@ -118,7 +118,15 @@ jobs:
         # push actually reaches Maven Central. See the note on the job's
         # `environment:` above for what does and doesn't gate this.
         if: github.event_name == 'push'
-        run: cd android && ./gradlew publishAndReleaseToMavenCentral
+        # --no-daemon: the previous step already started a Gradle daemon
+        # (make build-android -> ./gradlew assembleRelease) without these
+        # secrets in its environment. Gradle reuses a running daemon by
+        # default regardless of env var changes since it started, so this
+        # step would otherwise silently sign with an empty/missing key
+        # ("Cannot query the value of this provider because it has no value
+        # available"). Forcing a fresh JVM here guarantees it sees the
+        # current environment.
+        run: cd android && ./gradlew publishAndReleaseToMavenCentral --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
