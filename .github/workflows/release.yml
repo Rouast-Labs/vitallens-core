@@ -122,7 +122,93 @@ jobs:
         # signingInMemoryKeyId is required because GPG_PRIVATE_KEY was exported via
         # `gpg --export-secret-subkeys`, which Gradle's signing plugin can't
         # disambiguate without an explicit key ID (short form, 0x-prefixed).
-        run: cd android && ./gradlew publishAndReleaseToMavenCentral --no-daemon
+        run: cd kotlin && ./gradlew :android:publishAndReleaseToMavenCentral --no-daemon
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.GPG_PRIVATE_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.GPG_PASSPHRASE }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.GPG_KEY_ID }}
+
+  # Publishes the test/dev-only desktop JVM artifact (com.rouast:vitallens-core-jvm,
+  # see kotlin/jvm/build.gradle.kts) — NOT part of the production Android SDK
+  # surface, so it deliberately has its own coordinate and its own jobs here.
+  #
+  # The published jar bundles BOTH a macOS and a Linux native slice (the real
+  # consumer, vitallens-android, runs its tests on Linux CI) — but neither OS
+  # can cross-compile a native library for the other, so each slice is built
+  # on its own runner and merged before packaging. Mirrors the
+  # python-release -> publish-pypi matrix-build-then-merge pattern above.
+  jvm-native-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - name: Build macOS native slices + Kotlin bindings
+        run: make build-jvm-native-macos bindings-kotlin-jvm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jvm-natives-darwin
+          path: kotlin/jvm/nativeLibs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jvm-bindings
+          path: bindings/kotlin
+
+  jvm-native-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build Linux native slice
+        run: make build-jvm-native-linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jvm-natives-linux
+          path: kotlin/jvm/nativeLibs
+
+  jvm-release:
+    needs: [jvm-native-macos, jvm-native-linux]
+    runs-on: ubuntu-latest
+    # Same manual-approval gate as android-release — see its comment above
+    # for why this doesn't by itself distinguish a real tag push from a dry
+    # run (workflow_dispatch); that's handled by the `if:` below. No Rust
+    # toolchain needed on this job — it only assembles and publishes what the
+    # two native jobs already built.
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download native libraries and bindings
+        uses: actions/download-artifact@v4
+        with:
+          pattern: jvm-natives-*
+          merge-multiple: true
+          path: kotlin/jvm/nativeLibs
+      - uses: actions/download-artifact@v4
+        with:
+          name: jvm-bindings
+          path: bindings/kotlin
+      - name: Assemble JVM Jar
+        # Always run (even on a dry run) — this is the only place the merged,
+        # cross-platform jar actually gets built and validated end-to-end.
+        run: cd kotlin && ./gradlew :jvm:jar
+      - name: Publish to Maven Central
+        # Skipped on a manual workflow_dispatch dry run — only a real tag
+        # push actually reaches Maven Central. See android-release's `if:`
+        # above for the same convention.
+        if: github.event_name == 'push'
+        run: cd kotlin && ./gradlew :jvm:publishAndReleaseToMavenCentral --no-daemon
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.SONATYPE_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.SONATYPE_PASSWORD }}
