@@ -35,9 +35,13 @@ pkg/
 /bindings/kotlin/
 dist/
 
-# Android
-/android/build/
-/android/.gradle/
-/android/.kotlin/
-/android/jniLibs/
-/android/local.properties
+# Kotlin/Gradle multi-module build (root aggregator + :android AAR + :jvm
+# desktop test artifact, com.rouast:vitallens-core / com.rouast:vitallens-core-jvm)
+/kotlin/build/
+/kotlin/.gradle/
+/kotlin/.kotlin/
+/kotlin/local.properties
+/kotlin/android/build/
+/kotlin/android/jniLibs/
+/kotlin/jvm/build/
+/kotlin/jvm/nativeLibs/

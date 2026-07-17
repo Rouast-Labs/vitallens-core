@@ -20,6 +20,7 @@ This core compiles directly into the native formats required by our clients:
 2. **Web (JavaScript/TypeScript):** Compiled to WebAssembly (`.wasm`) via `wasm-pack`.
 3. **Python:** Compiled as a native Python extension (`.so`) via PyO3 and Maturin.
 4. **Android:** Compiled as an `.aar` with Kotlin bindings via UniFFI and `cargo-ndk`.
+5. **JVM (test-only):** Same Kotlin bindings + a JNA-loaded native lib, for JVM unit tests.
 
 ## Integration Guides
 

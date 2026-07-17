@@ -34,6 +34,9 @@ jobs:
       - name: Check WebAssembly
         run: make check-web
 
+      - name: Check JVM/Desktop (Linux) Bindings
+        run: make check-jvm
+
   apple-macos:
     name: Apple Checks (iOS, macOS)
     runs-on: macos-latest
