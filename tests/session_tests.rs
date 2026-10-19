@@ -244,6 +244,7 @@ fn run_session_extraction(
         n_inputs: 4,
         roi_method: "face".to_string(),
         estimate_rolling_vitals: Some(true),
+        hrv_skip_seconds: None,
     };
     
     let session = Session::new(config);

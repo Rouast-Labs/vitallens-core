@@ -24,6 +24,9 @@ struct SessionCore {
     face_conf: Vec<f32>,
     face_note: Option<String>,
     last_emitted_timestamp: f64,
+    /// Timestamp of the first sample since creation or the last reset. Kept when old samples are
+    /// pruned, so the HRV skip period stays anchored to the start of the session.
+    session_start: Option<f64>,
     max_history: usize,
     active_vitals: Vec<String>,
     vital_metas: HashMap<String, VitalMeta>,
@@ -65,6 +68,7 @@ impl SessionCore {
             face_conf: Vec::new(),
             face_note: None,
             last_emitted_timestamp: -1.0,
+            session_start: None,
             max_history,
             active_vitals,
             vital_metas: meta_map,
@@ -114,6 +118,7 @@ impl SessionCore {
         if new_times.is_empty() { return 0; }
         
         if self.timestamps.is_empty() {
+            self.session_start.get_or_insert(new_times[0]);
             self.timestamps.extend_from_slice(new_times);
             return 0;
         }
@@ -173,6 +178,20 @@ impl SessionCore {
                 }
             }
         }
+    }
+
+    /// Number of samples at the front of the history that fall into the HRV skip period.
+    ///
+    /// Zero if no skip is configured. The skip period starts at the first sample of the session
+    /// (since creation or the last reset), so it does not shift when old samples are pruned.
+    fn hrv_skip_samples(&self) -> usize {
+        let skip = self.config.hrv_skip_seconds.unwrap_or(0.0);
+        if skip <= 0.0 {
+            return 0;
+        }
+        let Some(start) = self.session_start else { return 0 };
+        let skip_until = start + skip as f64;
+        self.timestamps.partition_point(|&t| t < skip_until)
     }
 
     /// Trims internal buffers to the maximum configured history limit.
@@ -316,7 +335,12 @@ impl SessionCore {
                         continue;
                     }
 
-                    let available_len = source_data_bufs.iter().map(|v| v.len()).min().unwrap_or(0);
+                    let mut available_len = source_data_bufs.iter().map(|v| v.len()).min().unwrap_or(0);
+                    if matches!(cfg.method, CalculationMethod::HrvFromPeaks(_)) {
+                        // Samples within the HRV skip period are not used
+                        let usable = self.timestamps.len().saturating_sub(self.hrv_skip_samples());
+                        available_len = available_len.min(usable);
+                    }
                     let target_fs = self.config.fps_target;
                     let min_frames = (cfg.min_window_seconds * target_fs) as usize;
 
@@ -436,7 +460,14 @@ impl SessionCore {
                     let stride_samples = (cfg.rolling_stride_seconds * target_fs).round() as usize;
                     let stride_samples = stride_samples.max(1);
 
-                    if n_frames < min_window_samples {
+                    // Samples within the HRV skip period are not used for HRV
+                    let skip = if matches!(cfg.method, CalculationMethod::HrvFromPeaks(_)) {
+                        self.hrv_skip_samples()
+                    } else {
+                        0
+                    };
+
+                    if n_frames < skip + min_window_samples {
                         continue;
                     }
 
@@ -449,9 +480,9 @@ impl SessionCore {
                     let mut calc_confs = Vec::new();
 
                     // Step through the array using the defined stride
-                    let mut i = min_window_samples - 1;
+                    let mut i = skip + min_window_samples - 1;
                     while i < n_frames {
-                        let start_idx = i.saturating_sub(max_window_samples - 1);
+                        let start_idx = i.saturating_sub(max_window_samples - 1).max(skip);
                         let end_idx = i + 1;
 
                         let ts_slice = &self.timestamps[start_idx..end_idx];
@@ -700,6 +731,7 @@ impl SessionCore {
         self.face_conf.clear();
         self.face_note = None;
         self.last_emitted_timestamp = -1.0;
+        self.session_start = None;
         
         for buf in self.signal_data.values_mut() {
             buf.clear();
@@ -820,6 +852,7 @@ mod tests {
             n_inputs: 4,
             roi_method: "face".to_string(),
             estimate_rolling_vitals: None,
+            hrv_skip_seconds: None,
         }
     }
 
