@@ -1581,10 +1581,23 @@ public struct SessionConfig {
     public var nInputs: UInt64
     public var roiMethod: String
     public var estimateRollingVitals: Bool?
+    /**
+     * Seconds at the start of a session (since its creation or the last reset) that are not used
+     * when deriving HRV. While the model's recurrent state settles, its output can distort the
+     * HRV. `None` or `0` uses everything. Heart rate, respiratory rate and the waveforms are not
+     * affected.
+     */
+    public var hrvSkipSeconds: Float?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(modelName: String, supportedVitals: [String], returnWaveforms: [String]?, fpsTarget: Float, inputSize: UInt64, nInputs: UInt64, roiMethod: String, estimateRollingVitals: Bool? = nil) {
+    public init(modelName: String, supportedVitals: [String], returnWaveforms: [String]?, fpsTarget: Float, inputSize: UInt64, nInputs: UInt64, roiMethod: String, estimateRollingVitals: Bool? = nil, 
+        /**
+         * Seconds at the start of a session (since its creation or the last reset) that are not used
+         * when deriving HRV. While the model's recurrent state settles, its output can distort the
+         * HRV. `None` or `0` uses everything. Heart rate, respiratory rate and the waveforms are not
+         * affected.
+         */hrvSkipSeconds: Float? = nil) {
         self.modelName = modelName
         self.supportedVitals = supportedVitals
         self.returnWaveforms = returnWaveforms
@@ -1593,6 +1606,7 @@ public struct SessionConfig {
         self.nInputs = nInputs
         self.roiMethod = roiMethod
         self.estimateRollingVitals = estimateRollingVitals
+        self.hrvSkipSeconds = hrvSkipSeconds
     }
 }
 
@@ -1624,6 +1638,9 @@ extension SessionConfig: Equatable, Hashable {
         if lhs.estimateRollingVitals != rhs.estimateRollingVitals {
             return false
         }
+        if lhs.hrvSkipSeconds != rhs.hrvSkipSeconds {
+            return false
+        }
         return true
     }
 
@@ -1636,6 +1653,7 @@ extension SessionConfig: Equatable, Hashable {
         hasher.combine(nInputs)
         hasher.combine(roiMethod)
         hasher.combine(estimateRollingVitals)
+        hasher.combine(hrvSkipSeconds)
     }
 }
 
@@ -1654,7 +1672,8 @@ public struct FfiConverterTypeSessionConfig: FfiConverterRustBuffer {
                 inputSize: FfiConverterUInt64.read(from: &buf), 
                 nInputs: FfiConverterUInt64.read(from: &buf), 
                 roiMethod: FfiConverterString.read(from: &buf), 
-                estimateRollingVitals: FfiConverterOptionBool.read(from: &buf)
+                estimateRollingVitals: FfiConverterOptionBool.read(from: &buf), 
+                hrvSkipSeconds: FfiConverterOptionFloat.read(from: &buf)
         )
     }
 
@@ -1667,6 +1686,7 @@ public struct FfiConverterTypeSessionConfig: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.nInputs, into: &buf)
         FfiConverterString.write(value.roiMethod, into: &buf)
         FfiConverterOptionBool.write(value.estimateRollingVitals, into: &buf)
+        FfiConverterOptionFloat.write(value.hrvSkipSeconds, into: &buf)
     }
 }
 
