@@ -19,6 +19,13 @@ pub struct SessionConfig {
     #[serde(default)]
     #[cfg_attr(not(target_arch = "wasm32"), uniffi(default = None))]
     pub estimate_rolling_vitals: Option<bool>,
+    /// Seconds at the start of a session (since its creation or the last reset) that are not used
+    /// when deriving HRV. While the model's recurrent state settles, its output can distort the
+    /// HRV. `None` or `0` uses everything. Heart rate, respiratory rate and the waveforms are not
+    /// affected.
+    #[serde(default)]
+    #[cfg_attr(not(target_arch = "wasm32"), uniffi(default = None))]
+    pub hrv_skip_seconds: Option<f32>,
 }
 
 /// A generic wrapper for a single physical signal and its corresponding confidence array.
@@ -330,7 +337,7 @@ pub struct VitalInfo {
 #[pymethods]
 impl SessionConfig {
     #[new]
-    #[pyo3(signature = (model_name, supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None, estimate_rolling_vitals=None))]
+    #[pyo3(signature = (model_name, supported_vitals, fps_target, input_size, n_inputs, roi_method, return_waveforms=None, estimate_rolling_vitals=None, hrv_skip_seconds=None))]
     fn new(
         model_name: String,
         supported_vitals: Vec<String>, 
@@ -339,12 +346,13 @@ impl SessionConfig {
         n_inputs: u64, 
         roi_method: String,
         return_waveforms: Option<Vec<String>>,
-        estimate_rolling_vitals: Option<bool>
+        estimate_rolling_vitals: Option<bool>,
+        hrv_skip_seconds: Option<f32>
     ) -> Self {
         Self {
             model_name, supported_vitals, return_waveforms,
             fps_target, input_size, n_inputs, roi_method,
-            estimate_rolling_vitals
+            estimate_rolling_vitals, hrv_skip_seconds
         }
     }
 }

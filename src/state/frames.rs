@@ -293,6 +293,7 @@ mod tests {
             n_inputs: 5,
             roi_method: "face".to_string(),
             estimate_rolling_vitals: None,
+            hrv_skip_seconds: None,
         };
         let buf_cfg = BufferConfig::from_session_config(&config);
         
