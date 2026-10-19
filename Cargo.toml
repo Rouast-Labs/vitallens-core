@@ -2,6 +2,10 @@
 name = "vitallens-core"
 version = "0.3.4"
 edition = "2021"
+description = "Core signal processing library for VitalLens"
+license = "MIT"
+# npm trusted publishing verifies that this matches the GitHub repository
+repository = "https://github.com/Rouast-Labs/vitallens-core"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]
