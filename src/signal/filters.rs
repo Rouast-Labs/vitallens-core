@@ -301,7 +301,6 @@ pub fn lowpass_filtfilt(signal: &[f32], fs: f32, cutoff: f32) -> Vec<f32> {
         return signal.to_vec();
     }
 
-    // Bilinear-transform coefficients with frequency pre-warping
     let k = (std::f64::consts::PI * cutoff as f64 / fs as f64).tan();
     let norm = 1.0 / (1.0 + std::f64::consts::SQRT_2 * k + k * k);
     let b0 = k * k * norm;
@@ -309,7 +308,6 @@ pub fn lowpass_filtfilt(signal: &[f32], fs: f32, cutoff: f32) -> Vec<f32> {
     let a1 = 2.0 * (k * k - 1.0) * norm;
     let a2 = (1.0 - std::f64::consts::SQRT_2 * k + k * k) * norm;
 
-    // Steady-state initial conditions for a unit step (scipy.signal.lfilter_zi)
     let zi0 = (b[1] - a1 * b[0] + b[2] - a2 * b[0]) / (1.0 + a1 + a2);
     let zi1 = b[2] - a2 * b[0] - a2 * zi0;
 
@@ -323,7 +321,6 @@ pub fn lowpass_filtfilt(signal: &[f32], fs: f32, cutoff: f32) -> Vec<f32> {
         }).collect()
     };
 
-    // Odd extension at both ends
     let first = signal[0] as f64;
     let last = signal[n - 1] as f64;
     let mut ext = Vec::with_capacity(n + 2 * PADLEN);
@@ -579,7 +576,6 @@ mod tests {
 
     #[test]
     fn test_lowpass_filtfilt_zero_phase() {
-        // A 1 Hz sine keeps its peak positions; a 10 Hz component is removed
         let fs = 30.0;
         let signal: Vec<f32> = (0..300).map(|i| {
             let t = i as f32 / fs;
@@ -597,7 +593,6 @@ mod tests {
         let short = vec![1.0, 2.0, 3.0];
         assert_eq!(lowpass_filtfilt(&short, 30.0, 3.0), short);
         let signal: Vec<f32> = (0..50).map(|i| i as f32).collect();
-        // Cutoff at or above Nyquist leaves the signal unchanged
         assert_eq!(lowpass_filtfilt(&signal, 5.0, 3.0), signal);
     }
 }

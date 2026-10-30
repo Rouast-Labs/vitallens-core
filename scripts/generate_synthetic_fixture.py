@@ -4,6 +4,8 @@ Real fixtures are at most about 2 minutes long, too short for LF/HF and SD1/SD2.
 builds a pulse waveform from a beat sequence whose intervals carry LF (0.1 Hz) and HF
 (0.25 Hz) modulation plus noise. HRV references come from NeuroKit2 on the exact beat
 times, independently of the core, so the test covers the whole path from waveform to metric.
+The stress index, which NeuroKit2 does not provide, uses the reference implementation in
+prepare_test_data.py.
 
 Usage: python scripts/generate_synthetic_fixture.py [--out tests/fixtures/synthetic_3min.json]
 """
@@ -11,6 +13,7 @@ import argparse
 import json
 import numpy as np
 import neurokit2 as nk
+from prepare_test_data import stress_index_windowed_reference
 
 FS = 30.0
 DURATION_S = 180.0
@@ -55,6 +58,7 @@ def references(beats):
     "hrv_pnn50": (td["HRV_pNN50"].values[0], "%"),
     "hrv_lfhf": (fd["HRV_LFHF"].values[0], "ratio"),
     "hrv_sd1sd2": (nl["HRV_SD1SD2"].values[0], "ratio"),
+    "stress_index": (stress_index_windowed_reference(np.diff(beats) * 1000, beats[1:]), "SI"),
   }
 
 

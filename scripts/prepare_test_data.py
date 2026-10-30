@@ -23,8 +23,35 @@ MIN_DURATION_THRESHOLDS = {
     "hrv_pnn50": 30.0,
     "hrv_sd1sd2": 120.0,
     "hrv_lfhf": 120.0,
-    "stress_index": 55.0
+    "stress_index": 25.0
 }
+
+# Stress index: Baevsky's AMo / (2 Mo MxDMn) with MxDMn between these percentiles,
+# on 30 s windows (median over windows; a trailing window counts from 25 s)
+SI_BIN_MS = 50.0
+SI_RANGE_PERCENTILES = (5.0, 95.0)
+SI_WINDOW_S = 30.0
+SI_MIN_WINDOW_S = 25.0
+
+def stress_index_reference(intervals_ms):
+    iv = np.asarray(intervals_ms, dtype=np.float64)
+    if len(iv) < 5: return np.nan
+    mxdmn = (np.percentile(iv, SI_RANGE_PERCENTILES[1]) - np.percentile(iv, SI_RANGE_PERCENTILES[0])) / 1000.0
+    if mxdmn <= 0: return np.nan
+    counts = np.bincount((iv // SI_BIN_MS).astype(int))
+    amo = 100.0 * counts.max() / len(iv)
+    mo = (np.argmax(counts) + 0.5) * SI_BIN_MS / 1000.0
+    return amo / (2.0 * mo * mxdmn)
+
+def stress_index_windowed_reference(intervals_ms, end_times_s):
+    iv, t = np.asarray(intervals_ms), np.asarray(end_times_s)
+    start = t[0] - iv[0] / 1000.0
+    span = t[-1] - start
+    full = int(span // SI_WINDOW_S)
+    n = full + 1 if full == 0 or span - full * SI_WINDOW_S >= SI_MIN_WINDOW_S else full
+    vals = [stress_index_reference(iv[(t > start + k * SI_WINDOW_S) & (t <= start + (k + 1) * SI_WINDOW_S)]) for k in range(n)]
+    vals = [v for v in vals if np.isfinite(v)]
+    return float(np.median(vals)) if vals else np.nan
 
 def lowpass_rust_parity(signal, fs, rate_hint):
     """2nd-order Butterworth, forward-backward, matching the core's HRV low-pass."""
@@ -131,6 +158,9 @@ def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_t
         if 'HRV_SD1SD2' in nl: metrics['hrv_sd1sd2'] = nl['HRV_SD1SD2'].values[0]
     except Exception as e:
         print(f"[{label}] Nonlinear error: {e}")
+
+    si = stress_index_windowed_reference(rri["RRI"], rri["RRI_Time"])
+    if np.isfinite(si): metrics['stress_index'] = si
 
     avg_conf = float(np.mean(confidence_array)) if len(confidence_array) > 0 else 0.0
     final_conf = min(avg_conf, min_conf_peaks)
@@ -279,7 +309,7 @@ def main():
             peaks_float, fs, confidence_data, CONF_THRESH, "PPG"
         )
         
-        for key in ["heart_rate", "hrv_sdnn", "hrv_rmssd", "hrv_lfhf", "hrv_pnn50", "hrv_sd1sd2"]:
+        for key in ["heart_rate", "hrv_sdnn", "hrv_rmssd", "hrv_lfhf", "hrv_pnn50", "hrv_sd1sd2", "stress_index"]:
             min_dur = MIN_DURATION_THRESHOLDS.get(key, 0)
             if duration_sec < min_dur:
                 if key in vitals: del vitals[key]
@@ -291,7 +321,7 @@ def main():
                 if key not in vitals: vitals[key] = {}
                 vitals[key]["value"] = round(nk_metrics[key], 2)
                 vitals[key]["confidence"] = round(float(nk_conf), 4)
-                vitals[key]["note"] = "Ground Truth (NeuroKit2 Verified)"
+                vitals[key]["note"] = "Ground Truth (Stress index formula)" if key == "stress_index" else "Ground Truth (NeuroKit2 Verified)"
                 print(f"    [WRITE] {key}: {vitals[key]['value']} (conf: {vitals[key]['confidence']})")
 
     if "respiratory_waveform" in waveforms:

@@ -37355,9 +37355,9 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "stress_index": {
-            "value": 75.0,
-            "confidence": 0.99,
-            "note": "Ground Truth (Manual)"
+            "value": 504.12,
+            "confidence": 0.9853,
+            "note": "Ground Truth (Stress index formula)"
         },
         "hrv_pnn50": {
             "value": 5.31,

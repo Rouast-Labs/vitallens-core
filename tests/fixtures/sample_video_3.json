@@ -19999,9 +19999,9 @@
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "stress_index": {
-            "value": 50.0,
-            "confidence": 0.56,
-            "note": "Ground Truth (Manual)"
+            "value": 80.23,
+            "confidence": 0.5624,
+            "note": "Ground Truth (Stress index formula)"
         },
         "hrv_pnn50": {
             "value": 50.0,

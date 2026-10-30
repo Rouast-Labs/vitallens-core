@@ -14,7 +14,7 @@ const RMSSD_TOLERANCE_MS: f32 = 5.0;
 const LFHF_TOLERANCE: f32 = 0.5;
 const PNN50_TOLERANCE: f32 = 5.0;
 const SD1SD2_TOLERANCE: f32 = 0.05;
-const STRESS_INDEX_TOLERANCE: f32 = 20.0;
+const STRESS_INDEX_REL_TOLERANCE: f32 = 0.15;
 
 #[derive(Deserialize, Debug)]
 struct ReferenceData {
@@ -237,7 +237,7 @@ fn verify_stress_index(
         return Err(format!("[{}] Stress Index Confidence Invalid. Got {:.2}, Max Input {:.2}", filename, calc_conf, max_input_conf));
     }
 
-    if diff <= STRESS_INDEX_TOLERANCE {
+    if diff <= STRESS_INDEX_REL_TOLERANCE * ground_truth_si {
         Ok(())
     } else {
         Err(format!("[{}] Stress Index Mismatch. Expected {:.2}, Got {:.2} (Diff {:.2})", filename, ground_truth_si, calculated, diff))

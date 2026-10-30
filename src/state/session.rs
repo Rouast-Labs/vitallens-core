@@ -57,7 +57,6 @@ impl SessionCore {
             }
         }
 
-        // Keep enough history for the longest minimum window among the active vitals
         let longest_min_window = resolved_metas.iter()
             .flat_map(|m| m.derivations.iter().map(|d| d.min_window_seconds))
             .fold(DEFAULT_HISTORY_SECONDS, f32::max)

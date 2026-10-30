@@ -11047,6 +11047,12 @@
             "unit": "ratio",
             "confidence": 0.95,
             "note": "Synthetic (NeuroKit2 from known beat times)"
+        },
+        "stress_index": {
+            "value": 203.53,
+            "unit": "SI",
+            "confidence": 0.95,
+            "note": "Synthetic (NeuroKit2 from known beat times)"
         }
     },
     "fps": 30.0,

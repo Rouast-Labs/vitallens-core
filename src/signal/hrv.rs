@@ -1,11 +1,16 @@
 use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks, resolve_time};
 use crate::signal::filters;
 
-/// Low-pass cutoff applied before HRV peak detection in Hz. Removes waveform noise that
-/// would otherwise jitter the peak positions and inflate beat-to-beat metrics.
+/// Low-pass cutoff applied before HRV peak detection in Hz.
 const HRV_LOWPASS_HZ: f32 = 3.0;
-/// The cutoff is raised to this multiple of the heart rate so the pulse itself is never attenuated.
+/// The cutoff is raised to this multiple of the heart rate.
 const HRV_LOWPASS_RATE_FACTOR: f32 = 1.3;
+/// Window on which the stress index is defined, in seconds.
+const SI_WINDOW_SECONDS: f32 = 30.0;
+/// Shortest window that still yields a stress index, in seconds.
+const SI_MIN_WINDOW_SECONDS: f32 = 25.0;
+/// Percentiles bounding the variation range in the stress index.
+const SI_RANGE_PERCENTILES: (f32, f32) = (5.0, 95.0);
 
 /// Configuration options for extracting Normal-to-Normal (NN) intervals.
 #[derive(Debug, Clone, Copy)]
@@ -163,7 +168,7 @@ fn calculate_metric(metric: crate::registry::HrvMetric, runs: &[NnRun]) -> f32 {
             let times: Vec<f64> = runs.iter().flat_map(|r| r.times.iter().copied()).collect();
             lfhf_from_times(&intervals, &times)
         },
-        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
+        crate::registry::HrvMetric::StressIndex => stress_index_windowed(runs),
         crate::registry::HrvMetric::Pnn50 => pnn50_from_pairs(&successive_pairs(&interval_runs)),
         crate::registry::HrvMetric::Sd1Sd2 => sd1sd2_from_pairs(&successive_pairs(&interval_runs)),
     }
@@ -341,7 +346,6 @@ pub fn extract_nn_runs(
 ) -> (Vec<NnRun>, f32) {
     let mut all_intervals = Vec::new();
     let mut end_times = Vec::new();
-    // Position of each interval among all adjacent peak pairs; consecutive intervals differ by one
     let mut positions = Vec::new();
     let mut all_used_confidences = Vec::new();
 
@@ -374,7 +378,6 @@ pub fn extract_nn_runs(
             }
             pos += 1;
         }
-        // Intervals from different sequences are never consecutive
         pos += 1;
     }
 
@@ -468,8 +471,6 @@ pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
 
 /// Calculates the LF/HF ratio from NN intervals placed at the times of their ending beats.
 ///
-/// Using real beat times keeps the time axis correct where intervals were rejected.
-///
 /// # Arguments
 /// * `nn_intervals` - Slice of valid NN intervals in milliseconds.
 /// * `times` - Time of the beat ending each interval, in seconds.
@@ -503,7 +504,8 @@ fn lfhf_from_times(nn_intervals: &[f32], times: &[f64]) -> f32 {
     }
 }
 
-/// Calculates the Baevsky Stress Index (SI).
+/// Calculates the stress index for one window: Baevsky's AMo / (2 * Mo * MxDMn), with the
+/// variation range MxDMn taken between the 5th and 95th percentile.
 ///
 /// # Arguments
 /// * `nn_intervals_ms` - Slice of valid NN intervals in milliseconds.
@@ -514,10 +516,11 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
     if nn_intervals_ms.len() < 5 { return 0.0; }
 
     let bin_size = 50.0;
-    let min_val = nn_intervals_ms.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_val = nn_intervals_ms.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+    let mut sorted = nn_intervals_ms.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let max_val = sorted[sorted.len() - 1];
 
-    let range = max_val - min_val;
+    let range = percentile(&sorted, SI_RANGE_PERCENTILES.1) - percentile(&sorted, SI_RANGE_PERCENTILES.0);
     if range < f32::EPSILON { return 0.0; }
 
     let max_bin_idx = (max_val / bin_size).floor() as usize;
@@ -530,9 +533,8 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
         }
     }
 
-    let (max_count_idx, &max_count) = histogram.iter().enumerate()
-        .max_by_key(|&(_, count)| count)
-        .unwrap_or((0, &0));
+    let max_count = histogram.iter().copied().max().unwrap_or(0);
+    let max_count_idx = histogram.iter().position(|&count| count == max_count).unwrap_or(0);
 
     let amo = (max_count as f32 / nn_intervals_ms.len() as f32) * 100.0;
     let mode_ms = (max_count_idx as f32 * bin_size) + (bin_size / 2.0);
@@ -543,6 +545,53 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
     if mo_sec <= 0.0 || mxdmn_sec <= 0.0 { return 0.0; }
 
     amo / (2.0 * mo_sec * mxdmn_sec)
+}
+
+/// Calculates the stress index on fixed windows.
+///
+/// Splits the intervals into consecutive windows of `SI_WINDOW_SECONDS` by beat time and
+/// returns the median over windows. A trailing window counts if it spans at least
+/// `SI_MIN_WINDOW_SECONDS`; data shorter than one window is used as a single window.
+///
+/// # Arguments
+/// * `runs` - Runs of consecutive NN intervals.
+///
+/// # Returns
+/// The Stress Index value as an `f32`.
+fn stress_index_windowed(runs: &[NnRun]) -> f32 {
+    let mut beats: Vec<(f64, f32)> = runs.iter()
+        .flat_map(|r| r.times.iter().copied().zip(r.intervals.iter().copied()))
+        .collect();
+    if beats.is_empty() { return 0.0; }
+    beats.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let start = beats[0].0 - beats[0].1 as f64 / 1000.0;
+    let span = beats[beats.len() - 1].0 - start;
+    let window = SI_WINDOW_SECONDS as f64;
+    let full = (span / window).floor() as usize;
+    let n_windows = if full == 0 || span - full as f64 * window >= SI_MIN_WINDOW_SECONDS as f64 { full + 1 } else { full };
+
+    let mut values: Vec<f32> = (0..n_windows)
+        .map(|k| {
+            let (t0, t1) = (start + k as f64 * window, start + (k + 1) as f64 * window);
+            let window_intervals: Vec<f32> = beats.iter().filter(|(t, _)| *t > t0 && *t <= t1).map(|&(_, iv)| iv).collect();
+            calculate_stress_index(&window_intervals)
+        })
+        .filter(|&v| v > 0.0)
+        .collect();
+    if values.is_empty() { return 0.0; }
+
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 0 { (values[mid - 1] + values[mid]) / 2.0 } else { values[mid] }
+}
+
+/// Linearly interpolated percentile of sorted values, as numpy's default.
+fn percentile(sorted: &[f32], p: f32) -> f32 {
+    let pos = p / 100.0 * (sorted.len() - 1) as f32;
+    let lo = pos.floor() as usize;
+    let hi = (lo + 1).min(sorted.len() - 1);
+    sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo as f32)
 }
 
 /// Calculates the percentage of successive NN intervals that differ by more than 50 ms (pNN50).
@@ -670,10 +719,8 @@ fn outlier_mask(intervals: &[f32], min_rr: f32, max_rr: f32) -> Vec<bool> {
 /// * `times` - Time of the beat ending each interval, in seconds.
 /// * `target_fs` - The output sampling frequency in Hz.
 ///
-/// Uses a natural cubic spline, as linear interpolation attenuates the HF band and inflates LF/HF.
-///
 /// # Returns
-/// The interpolated intervals on a uniform grid from the first to the last time.
+/// The intervals interpolated with a natural cubic spline on a uniform grid from the first to the last time.
 fn resample_nn_intervals(nn_intervals: &[f32], times: &[f64], target_fs: f32) -> Vec<f32> {
     if nn_intervals.is_empty() || times.len() != nn_intervals.len() { return Vec::new(); }
 
@@ -718,7 +765,6 @@ fn spline_second_derivatives(t: &[f64], y: &[f64]) -> Vec<f64> {
     if n < 3 { return m; }
 
     let h: Vec<f64> = t.windows(2).map(|w| w[1] - w[0]).collect();
-    // Forward sweep over the interior points; the natural boundary fixes m[0] = m[n-1] = 0
     let mut c_prime = vec![0.0; n];
     let mut d_prime = vec![0.0; n];
     for i in 1..n - 1 {
@@ -1056,11 +1102,50 @@ mod tests {
 
     #[test]
     fn test_calculate_stress_index_binning_boundary() {
+        // Range between the 5th (1002.5) and 95th (1160) percentile: 157.5 ms; AMo 83.3%, Mo 1.025 s
         let intervals = vec![1000.0, 1010.0, 1020.0, 1030.0, 1040.0, 1200.0];
         let si = calculate_stress_index(&intervals);
-        
-        assert!(si > 0.0);
-        assert!(si > 190.0 && si < 220.0, "Expected SI ~203, got {}", si);
+
+        assert!((si - 258.1).abs() < 0.5, "Expected SI ~258.1, got {}", si);
+    }
+
+    #[test]
+    fn test_percentile_matches_numpy() {
+        // np.percentile([1, 2, 3, 4, 10], [5, 50, 95]) -> [1.2, 3.0, 8.8]
+        let sorted = [1.0, 2.0, 3.0, 4.0, 10.0];
+        assert!((percentile(&sorted, 5.0) - 1.2).abs() < 1e-5);
+        assert!((percentile(&sorted, 50.0) - 3.0).abs() < 1e-5);
+        assert!((percentile(&sorted, 95.0) - 8.8).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_stress_index_median_over_30s_windows() {
+        // 90 s in three 30 s windows: alternating 950/1050 ms, then 900/1100 ms, then 950/1050 ms
+        let pattern = |a: f32, b: f32| -> Vec<f32> { (0..30).map(|i| if i % 2 == 0 { a } else { b }).collect() };
+        let intervals: Vec<f32> = [pattern(950.0, 1050.0), pattern(900.0, 1100.0), pattern(950.0, 1050.0)].concat();
+        let mut t = 0.0;
+        let times: Vec<f64> = intervals.iter().map(|&iv| { t += iv as f64 / 1000.0; t }).collect();
+        let runs = vec![NnRun { intervals: intervals.clone(), times }];
+
+        let si = calculate_metric(crate::registry::HrvMetric::StressIndex, &runs);
+        let first_window = calculate_stress_index(&intervals[..30]);
+        assert!((si - first_window).abs() < 1e-3, "Expected median {} , got {}", first_window, si);
+        // On all 90 s at once, the second pattern would widen the range and lower the value
+        assert!(calculate_stress_index(&intervals) < first_window);
+    }
+
+    #[test]
+    fn test_stress_index_short_trailing_window_ignored() {
+        // 30 s at 1000/1010 ms, then 10 s of 600/1400 ms: the 10 s remainder is below the minimum window
+        let mut intervals: Vec<f32> = (0..30).map(|i| if i % 2 == 0 { 1000.0 } else { 1010.0 }).collect();
+        intervals.extend((0..10).map(|i| if i % 2 == 0 { 600.0 } else { 1400.0 }));
+        let mut t = 0.0;
+        let times: Vec<f64> = intervals.iter().map(|&iv| { t += iv as f64 / 1000.0; t }).collect();
+        let runs = vec![NnRun { intervals: intervals.clone(), times }];
+
+        let si = calculate_metric(crate::registry::HrvMetric::StressIndex, &runs);
+        let first_window: Vec<f32> = intervals.iter().take_while({ let mut s = 0.0; move |&&iv| { s += iv; s <= 30_000.0 } }).copied().collect();
+        assert!((si - calculate_stress_index(&first_window)).abs() < 1e-3);
     }
 
     #[test]
