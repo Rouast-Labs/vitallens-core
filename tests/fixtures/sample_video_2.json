@@ -6985,7 +6985,7 @@
     },
     "vitals": {
         "hrv_rmssd": {
-            "value": 53.61,
+            "value": 49.07,
             "unit": "ms",
             "confidence": 0.92,
             "note": "Ground Truth (NeuroKit2 Verified)"
@@ -7003,7 +7003,7 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "hrv_sdnn": {
-            "value": 56.64,
+            "value": 56.84,
             "unit": "ms",
             "confidence": 0.92,
             "note": "Ground Truth (NeuroKit2 Verified)"
@@ -7014,11 +7014,11 @@
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {
-			"value": 1.12,
+            "value": 1.12,
             "unit": "ratio",
             "confidence": 1.0,
             "note": "Ground Truth (Manual)."
-		}
+        }
     },
     "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.",
     "fps": 30.0,

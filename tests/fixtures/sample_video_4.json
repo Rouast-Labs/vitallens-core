@@ -21194,12 +21194,6 @@
         }
     },
     "vitals": {
-        "hrv_lfhf": {
-            "value": 0.3,
-            "unit": "unitless",
-            "confidence": 0.91,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
         "respiratory_rate": {
             "value": 17.0,
             "unit": "bpm",
@@ -21207,7 +21201,7 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "hrv_rmssd": {
-            "value": 101.77,
+            "value": 88.54,
             "unit": "ms",
             "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
@@ -21219,7 +21213,7 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "hrv_sdnn": {
-            "value": 73.36,
+            "value": 72.61,
             "unit": "ms",
             "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
@@ -21230,21 +21224,16 @@
             "note": "Ground Truth (Manual)"
         },
         "hrv_pnn50": {
-            "value": 60.42,
-            "confidence": 0.91,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
-        "hrv_sd1sd2": {
-            "value": 0.97,
+            "value": 53.33,
             "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {
-			"value": 0.6485,
+            "value": 0.6485,
             "unit": "ratio",
             "confidence": 1.0,
             "note": "Ground Truth (Manual)."
-		}
+        }
     },
     "message": "The provided values are estimates and should be interpreted according to the provided confidence levels ranging from 0 to 1. The VitalLens API is not a medical device and its estimates are not intended for any medical purposes.",
     "fps": 30.00312858483679,

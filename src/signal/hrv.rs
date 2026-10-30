@@ -1,5 +1,11 @@
 use crate::signal::peaks::{Peak, PeakOptions, SignalBounds, find_peaks, resolve_time};
-use crate::signal::filters; 
+use crate::signal::filters;
+
+/// Low-pass cutoff applied before HRV peak detection in Hz. Removes waveform noise that
+/// would otherwise jitter the peak positions and inflate beat-to-beat metrics.
+const HRV_LOWPASS_HZ: f32 = 3.0;
+/// The cutoff is raised to this multiple of the heart rate so the pulse itself is never attenuated.
+const HRV_LOWPASS_RATE_FACTOR: f32 = 1.3;
 
 /// Configuration options for extracting Normal-to-Normal (NN) intervals.
 #[derive(Debug, Clone, Copy)]
@@ -7,6 +13,7 @@ pub struct HrvOptions {
     pub confidence_threshold: f32,
     pub fs_fallback: f32,
     pub outlier_threshold: f32,
+    pub rate_bounds: SignalBounds,
 }
 
 impl Default for HrvOptions {
@@ -15,12 +22,29 @@ impl Default for HrvOptions {
             confidence_threshold: 0.5,
             fs_fallback: 30.0,
             outlier_threshold: 0.3,
+            rate_bounds: heart_rate_bounds(),
         }
     }
 }
 
+/// The heart rate range from the registry, used as the default for peak detection and interval limits.
+pub fn heart_rate_bounds() -> SignalBounds {
+    crate::registry::get_vital_meta("heart_rate")
+        .and_then(|meta| meta.derivations.first().map(|d| SignalBounds { min_rate: d.min_value, max_rate: d.max_value }))
+        .unwrap_or(SignalBounds { min_rate: 40.0, max_rate: 220.0 })
+}
+
+/// A run of NN intervals between truly consecutive beats.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NnRun {
+    /// Intervals in milliseconds.
+    pub intervals: Vec<f32>,
+    /// Time of the beat ending each interval, in seconds.
+    pub times: Vec<f64>,
+}
+
 /// High-level coordinator for Heart Rate Variability (HRV) metrics.
-/// Detects peaks, extracts gated intervals, and computes the requested metric.
+/// Low-pass filters the signal, detects peaks, extracts gated intervals, and computes the requested metric.
 ///
 /// # Arguments
 /// * `signal` - The input time-domain signal (e.g., PPG).
@@ -54,27 +78,24 @@ pub fn estimate_hrv(
         ..Default::default()
     };
 
-    let sequences = find_peaks(signal, options);
+    let cutoff = rate_hint.map_or(HRV_LOWPASS_HZ, |hr| HRV_LOWPASS_HZ.max(HRV_LOWPASS_RATE_FACTOR * hr / 60.0));
+    let filtered = filters::lowpass_filtfilt(signal, fs, cutoff);
+
+    let sequences = find_peaks(&filtered, options);
 
     let hrv_opts = HrvOptions {
         fs_fallback: fs,
+        rate_bounds: bounds,
         ..Default::default()
     };
-    
-    let (intervals, min_conf_peaks) = extract_nn_intervals(&sequences, Some(timestamps), Some(confidence), hrv_opts);
 
-    if intervals.is_empty() {
+    let (runs, min_conf_peaks) = extract_nn_runs(&sequences, Some(timestamps), Some(confidence), hrv_opts);
+
+    if runs.is_empty() {
         return (0.0, 0.0);
     }
 
-    let value = match metric {
-        crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
-        crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
-        crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
-        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
-        crate::registry::HrvMetric::Pnn50 => calculate_pnn50(&intervals),
-        crate::registry::HrvMetric::Sd1Sd2 => calculate_sd1sd2(&intervals),
-    };
+    let value = calculate_metric(metric, &runs);
 
     let avg_conf = if confidence.is_empty() {
         0.0
@@ -110,22 +131,49 @@ pub fn estimate_hrv_from_detections(
         ..Default::default()
     };
     
-    let (intervals, min_conf_peaks) = extract_nn_intervals(sequences, timestamps, confidence, hrv_opts);
+    let (runs, min_conf_peaks) = extract_nn_runs(sequences, timestamps, confidence, hrv_opts);
 
-    if intervals.is_empty() {
+    if runs.is_empty() {
         return (0.0, 0.0);
     }
 
-    let value = match metric {
-        crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
-        crate::registry::HrvMetric::Rmssd => calculate_rmssd(&intervals),
-        crate::registry::HrvMetric::LfHf => calculate_lfhf(&intervals),
-        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
-        crate::registry::HrvMetric::Pnn50 => calculate_pnn50(&intervals),
-        crate::registry::HrvMetric::Sd1Sd2 => calculate_sd1sd2(&intervals),
-    };
+    let value = calculate_metric(metric, &runs);
 
     (value, min_conf_peaks)
+}
+
+/// Computes an HRV metric from runs of consecutive NN intervals.
+///
+/// Metrics built on successive differences (RMSSD, pNN50, SD1/SD2) only pair intervals
+/// within a run; the others use all intervals.
+///
+/// # Arguments
+/// * `metric` - The specific HRV metric to calculate.
+/// * `runs` - Runs of consecutive NN intervals.
+///
+/// # Returns
+/// The metric value as an `f32`.
+fn calculate_metric(metric: crate::registry::HrvMetric, runs: &[NnRun]) -> f32 {
+    let intervals: Vec<f32> = runs.iter().flat_map(|r| r.intervals.iter().copied()).collect();
+    let interval_runs: Vec<&[f32]> = runs.iter().map(|r| r.intervals.as_slice()).collect();
+    match metric {
+        crate::registry::HrvMetric::Sdnn => calculate_sdnn(&intervals),
+        crate::registry::HrvMetric::Rmssd => rmssd_from_pairs(&successive_pairs(&interval_runs)),
+        crate::registry::HrvMetric::LfHf => {
+            let times: Vec<f64> = runs.iter().flat_map(|r| r.times.iter().copied()).collect();
+            lfhf_from_times(&intervals, &times)
+        },
+        crate::registry::HrvMetric::StressIndex => calculate_stress_index(&intervals),
+        crate::registry::HrvMetric::Pnn50 => pnn50_from_pairs(&successive_pairs(&interval_runs)),
+        crate::registry::HrvMetric::Sd1Sd2 => sd1sd2_from_pairs(&successive_pairs(&interval_runs)),
+    }
+}
+
+/// Collects pairs of successive intervals within each run.
+fn successive_pairs<T: AsRef<[f32]>>(runs: &[T]) -> Vec<(f32, f32)> {
+    runs.iter()
+        .flat_map(|run| run.as_ref().windows(2).map(|w| (w[0], w[1])))
+        .collect()
 }
 
 /// Estimates rolling HRV metric from pre-computed peak detection sequences using a time-based window.
@@ -268,16 +316,41 @@ pub fn extract_nn_intervals(
     confidence: Option<&[f32]>,
     options: HrvOptions
 ) -> (Vec<f32>, f32) {
+    let (runs, min_conf) = extract_nn_runs(sequences, timestamps, confidence, options);
+    (runs.into_iter().flat_map(|r| r.intervals).collect(), min_conf)
+}
+
+/// Extracts valid NN intervals grouped into runs of truly consecutive beats.
+///
+/// A run ends where a sequence ends, where a peak fails the confidence gate, and where
+/// an interval is rejected as an outlier. Successive differences are only valid within a run.
+///
+/// # Arguments
+/// * `sequences` - A slice of peak sequences detected from the signal.
+/// * `timestamps` - Optional array of reference timestamps.
+/// * `confidence` - Optional array of confidence scores.
+/// * `options` - Configuration options for HRV extraction.
+///
+/// # Returns
+/// A tuple containing `(runs_of_intervals, minimum_confidence_used)`.
+pub fn extract_nn_runs(
+    sequences: &[Vec<Peak>],
+    timestamps: Option<&[f64]>,
+    confidence: Option<&[f32]>,
+    options: HrvOptions
+) -> (Vec<NnRun>, f32) {
     let mut all_intervals = Vec::new();
+    let mut end_times = Vec::new();
+    // Position of each interval among all adjacent peak pairs; consecutive intervals differ by one
+    let mut positions = Vec::new();
     let mut all_used_confidences = Vec::new();
-    
+
     let ts_slice = timestamps.unwrap_or(&[]);
     let conf_slice = confidence.unwrap_or(&[]);
 
+    let mut pos = 0;
     for sequence in sequences {
-        if sequence.len() < 2 { continue; }
-
-        for i in 0..sequence.len() - 1 {
+        for i in 0..sequence.len().saturating_sub(1) {
             let p1 = &sequence[i];
             let p2 = &sequence[i+1];
 
@@ -285,34 +358,55 @@ pub fn extract_nn_intervals(
             let c2 = if !conf_slice.is_empty() && p2.index < conf_slice.len() { conf_slice[p2.index] } else { 1.0 };
 
             if c1 >= options.confidence_threshold && c2 >= options.confidence_threshold {
-                
+
                 let t1 = resolve_time(p1, ts_slice, options.fs_fallback);
                 let t2 = resolve_time(p2, ts_slice, options.fs_fallback);
 
                 let diff_sec = t2 - t1;
-                
+
                 if diff_sec > 0.0 {
                     all_intervals.push((diff_sec * 1000.0) as f32);
+                    end_times.push(t2);
+                    positions.push(pos);
                     all_used_confidences.push(c1);
                     all_used_confidences.push(c2);
                 }
             }
+            pos += 1;
         }
+        // Intervals from different sequences are never consecutive
+        pos += 1;
     }
 
     if all_intervals.is_empty() {
         return (Vec::new(), 0.0);
     }
 
-    let filtered_intervals = filter_outliers(&all_intervals, options.outlier_threshold);
+    let min_interval_ms = 60_000.0 / options.rate_bounds.max_rate;
+    let max_interval_ms = 60_000.0 / options.rate_bounds.min_rate;
+    let keep = outlier_mask(&all_intervals, min_interval_ms, max_interval_ms);
 
-    if filtered_intervals.is_empty() {
+    let mut runs: Vec<NnRun> = Vec::new();
+    let mut prev_pos: Option<usize> = None;
+    for i in (0..all_intervals.len()).filter(|&i| keep[i]) {
+        let p = positions[i];
+        if prev_pos.map_or(true, |q| p != q + 1) {
+            runs.push(NnRun { intervals: Vec::new(), times: Vec::new() });
+        }
+        if let Some(run) = runs.last_mut() {
+            run.intervals.push(all_intervals[i]);
+            run.times.push(end_times[i]);
+        }
+        prev_pos = Some(p);
+    }
+
+    if runs.is_empty() {
         return (Vec::new(), 0.0);
     }
 
     let min_conf = all_used_confidences.iter().fold(1.0f32, |a, &b| a.min(b));
 
-    (filtered_intervals, min_conf)
+    (runs, min_conf)
 }
 
 /// Calculates the Standard Deviation of NN intervals (SDNN).
@@ -346,17 +440,17 @@ pub fn calculate_sdnn(nn_intervals: &[f32]) -> f32 {
 /// # Returns
 /// The RMSSD value in milliseconds as an `f32`.
 pub fn calculate_rmssd(nn_intervals: &[f32]) -> f32 {
-    if nn_intervals.len() < 2 {
+    rmssd_from_pairs(&successive_pairs(&[nn_intervals]))
+}
+
+fn rmssd_from_pairs(pairs: &[(f32, f32)]) -> f32 {
+    if pairs.is_empty() {
         return 0.0;
     }
 
-    let mut sum_sq_diff = 0.0;
-    for i in 0..nn_intervals.len() - 1 {
-        let diff = nn_intervals[i+1] - nn_intervals[i];
-        sum_sq_diff += diff * diff;
-    }
+    let sum_sq_diff: f32 = pairs.iter().map(|&(a, b)| (b - a) * (b - a)).sum();
 
-    (sum_sq_diff / (nn_intervals.len() - 1) as f32).sqrt()
+    (sum_sq_diff / pairs.len() as f32).sqrt()
 }
 
 /// Calculates the ratio of Low Frequency (LF) to High Frequency (HF) power.
@@ -367,9 +461,25 @@ pub fn calculate_rmssd(nn_intervals: &[f32]) -> f32 {
 /// # Returns
 /// The LF/HF power ratio as an `f32`.
 pub fn calculate_lfhf(nn_intervals: &[f32]) -> f32 {
+    let mut t = 0.0;
+    let times: Vec<f64> = nn_intervals.iter().map(|&iv| { t += iv as f64 / 1000.0; t }).collect();
+    lfhf_from_times(nn_intervals, &times)
+}
+
+/// Calculates the LF/HF ratio from NN intervals placed at the times of their ending beats.
+///
+/// Using real beat times keeps the time axis correct where intervals were rejected.
+///
+/// # Arguments
+/// * `nn_intervals` - Slice of valid NN intervals in milliseconds.
+/// * `times` - Time of the beat ending each interval, in seconds.
+///
+/// # Returns
+/// The LF/HF power ratio as an `f32`.
+fn lfhf_from_times(nn_intervals: &[f32], times: &[f64]) -> f32 {
     const FS_R: f32 = 4.0;
-    
-    let resampled = resample_nn_intervals(nn_intervals, FS_R);
+
+    let resampled = resample_nn_intervals(nn_intervals, times, FS_R);
     let detrended = filters::detrend(&resampled, FS_R, 0.04);
     let mut scratch = crate::signal::fft::FftScratch::new();
     
@@ -443,25 +553,17 @@ pub fn calculate_stress_index(nn_intervals_ms: &[f32]) -> f32 {
 /// # Returns
 /// The pNN50 value as a percentage between 0.0 and 100.0 as an `f32`.
 pub fn calculate_pnn50(nn_intervals: &[f32]) -> f32 {
-    if nn_intervals.len() < 2 {
+    pnn50_from_pairs(&successive_pairs(&[nn_intervals]))
+}
+
+fn pnn50_from_pairs(pairs: &[(f32, f32)]) -> f32 {
+    if pairs.is_empty() {
         return 0.0;
     }
 
-    let mut count_above_50 = 0;
-    let total_comparisons = nn_intervals.len() - 1;
+    let count_above_50 = pairs.iter().filter(|&&(a, b)| (b - a).abs() > 50.0).count();
 
-    for i in 0..total_comparisons {
-        let diff = (nn_intervals[i+1] - nn_intervals[i]).abs();
-        if diff > 50.0 {
-            count_above_50 += 1;
-        }
-    }
-
-    if total_comparisons > 0 {
-        (count_above_50 as f32 / total_comparisons as f32) * 100.0
-    } else {
-        0.0
-    }
+    (count_above_50 as f32 / pairs.len() as f32) * 100.0
 }
 
 /// Calculates the ratio of SD1 (short-term) to SD2 (long-term) variability derived from a Poincaré plot.
@@ -472,7 +574,11 @@ pub fn calculate_pnn50(nn_intervals: &[f32]) -> f32 {
 /// # Returns
 /// The SD1/SD2 ratio as an `f32`.
 pub fn calculate_sd1sd2(nn_intervals: &[f32]) -> f32 {
-    if nn_intervals.len() < 3 {
+    sd1sd2_from_pairs(&successive_pairs(&[nn_intervals]))
+}
+
+fn sd1sd2_from_pairs(pairs: &[(f32, f32)]) -> f32 {
+    if pairs.len() < 2 {
         return 0.0;
     }
 
@@ -480,13 +586,10 @@ pub fn calculate_sd1sd2(nn_intervals: &[f32]) -> f32 {
     let mut sum_sq_sum = 0.0;
     let mut diff_sum = 0.0;
     let mut sum_sum = 0.0;
-    
-    let n = (nn_intervals.len() - 1) as f32;
 
-    for i in 0..nn_intervals.len() - 1 {
-        let x_i = nn_intervals[i];
-        let x_next = nn_intervals[i+1];
+    let n = pairs.len() as f32;
 
+    for &(x_i, x_next) in pairs {
         let v_perp = (x_next - x_i) / std::f32::consts::SQRT_2;
         diff_sum += v_perp;
         diff_sq_sum += v_perp * v_perp;
@@ -509,85 +612,128 @@ pub fn calculate_sd1sd2(nn_intervals: &[f32]) -> f32 {
     }
 }
 
-/// Removes extreme outliers from a sequence of NN intervals using a median-seeded bounds check.
-fn filter_outliers(intervals: &[f32], _threshold: f32) -> Vec<f32> {
+/// Flags extreme outliers in a sequence of NN intervals using a median-seeded bounds check.
+///
+/// # Arguments
+/// * `intervals` - Slice of NN intervals in milliseconds.
+/// * `min_rr` - Shortest valid interval in milliseconds.
+/// * `max_rr` - Longest valid interval in milliseconds.
+///
+/// # Returns
+/// A `Vec<bool>` that is `true` for each interval to keep.
+fn outlier_mask(intervals: &[f32], min_rr: f32, max_rr: f32) -> Vec<bool> {
     if intervals.len() < 2 {
-        return intervals.to_vec();
+        return vec![true; intervals.len()];
     }
 
-    const MIN_RR: f32 = 300.0;
-    const MAX_RR: f32 = 2000.0;
     const MAX_REL_CHANGE: f32 = 0.25;
 
     let mut valid_range_intervals: Vec<f32> = intervals.iter()
         .cloned()
-        .filter(|&x| x >= MIN_RR && x <= MAX_RR)
+        .filter(|&x| x >= min_rr && x <= max_rr)
         .collect();
 
     if valid_range_intervals.is_empty() {
-        return Vec::new();
+        return vec![false; intervals.len()];
     }
 
     valid_range_intervals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = valid_range_intervals.len() / 2;
     let median = valid_range_intervals[mid];
 
-    let mut filtered = Vec::with_capacity(intervals.len());
-    let mut last_accepted = median; 
+    let mut keep = Vec::with_capacity(intervals.len());
+    let mut last_accepted = median;
 
     for &curr in intervals {
-        if curr < MIN_RR || curr > MAX_RR {
+        if curr < min_rr || curr > max_rr {
+            keep.push(false);
             continue;
         }
 
         let diff = (curr - last_accepted).abs();
         if diff > last_accepted * MAX_REL_CHANGE {
+            keep.push(false);
             continue;
         }
 
-        filtered.push(curr);
+        keep.push(true);
         last_accepted = curr;
     }
 
-    filtered
+    keep
 }
 
 /// Resamples unevenly spaced NN intervals to a constant time-series frequency (e.g., 4Hz for LF/HF).
-fn resample_nn_intervals(nn_intervals: &[f32], target_fs: f32) -> Vec<f32> {
-    if nn_intervals.is_empty() { return Vec::new(); }
+///
+/// # Arguments
+/// * `nn_intervals` - Slice of NN intervals in milliseconds.
+/// * `times` - Time of the beat ending each interval, in seconds.
+/// * `target_fs` - The output sampling frequency in Hz.
+///
+/// Uses a natural cubic spline, as linear interpolation attenuates the HF band and inflates LF/HF.
+///
+/// # Returns
+/// The interpolated intervals on a uniform grid from the first to the last time.
+fn resample_nn_intervals(nn_intervals: &[f32], times: &[f64], target_fs: f32) -> Vec<f32> {
+    if nn_intervals.is_empty() || times.len() != nn_intervals.len() { return Vec::new(); }
 
-    let mut t = Vec::with_capacity(nn_intervals.len());
-    let mut current_t = 0.0;
-    for &interval_ms in nn_intervals {
-        current_t += interval_ms / 1000.0;
-        t.push(current_t);
-    }
+    let t0 = times[0];
+    let t: Vec<f64> = times.iter().map(|&x| x - t0).collect();
+    let y: Vec<f64> = nn_intervals.iter().map(|&v| v as f64).collect();
+    let m = spline_second_derivatives(&t, &y);
 
     let t_max = t[t.len() - 1];
-    let step = 1.0 / target_fs;
+    let step = 1.0 / target_fs as f64;
     let num_samples = (t_max / step).floor() as usize;
     let mut resampled = Vec::with_capacity(num_samples);
-    
+
     let mut cursor = 0;
     for i in 0..num_samples {
-        let t_u = i as f32 * step;
-        
+        let t_u = i as f64 * step;
+
         while cursor < t.len() - 1 && t[cursor + 1] < t_u {
             cursor += 1;
         }
-        
+
         if cursor >= t.len() - 1 { break; }
-        
-        let x0 = t[cursor];
-        let x1 = t[cursor + 1];
-        let y0 = nn_intervals[cursor];
-        let y1 = nn_intervals[cursor + 1];
-        
-        let val = y0 + (y1 - y0) * (t_u - x0) / (x1 - x0);
-        resampled.push(val);
+
+        let (x0, x1) = (t[cursor], t[cursor + 1]);
+        let (y0, y1) = (y[cursor], y[cursor + 1]);
+        let (m0, m1) = (m[cursor], m[cursor + 1]);
+        let h = x1 - x0;
+        let (a, b) = (x1 - t_u, t_u - x0);
+
+        let val = m0 * a.powi(3) / (6.0 * h) + m1 * b.powi(3) / (6.0 * h)
+            + (y0 / h - m0 * h / 6.0) * a + (y1 / h - m1 * h / 6.0) * b;
+        resampled.push(val as f32);
     }
-    
+
     resampled
+}
+
+/// Second derivatives of a natural cubic spline through `(t, y)`, solved with the Thomas algorithm.
+fn spline_second_derivatives(t: &[f64], y: &[f64]) -> Vec<f64> {
+    let n = t.len();
+    let mut m = vec![0.0; n];
+    if n < 3 { return m; }
+
+    let h: Vec<f64> = t.windows(2).map(|w| w[1] - w[0]).collect();
+    // Forward sweep over the interior points; the natural boundary fixes m[0] = m[n-1] = 0
+    let mut c_prime = vec![0.0; n];
+    let mut d_prime = vec![0.0; n];
+    for i in 1..n - 1 {
+        let a = h[i - 1];
+        let b = 2.0 * (h[i - 1] + h[i]);
+        let c = h[i];
+        let d = 6.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1]);
+        let denom = b - a * c_prime[i - 1];
+        c_prime[i] = c / denom;
+        d_prime[i] = (d - a * d_prime[i - 1]) / denom;
+    }
+    for i in (1..n - 1).rev() {
+        m[i] = d_prime[i] - c_prime[i] * m[i + 1];
+    }
+    m
 }
 
 #[cfg(test)]
@@ -652,9 +798,79 @@ mod tests {
     #[test]
     fn test_filter_outliers_removes_extreme_values() {
         let raw = vec![800.0, 810.0, 805.0, 1500.0, 800.0];
-        let filtered = filter_outliers(&raw, 0.3);
-        assert_eq!(filtered.len(), 4);
-        assert!(!filtered.contains(&1500.0));
+        let keep = outlier_mask(&raw, 272.7, 1500.0);
+        assert_eq!(keep, vec![true, true, true, false, true]);
+    }
+
+    #[test]
+    fn test_interval_limits_follow_heart_rate_bounds() {
+        let opts = HrvOptions::default();
+        assert_eq!((opts.rate_bounds.min_rate, opts.rate_bounds.max_rate), (40.0, 220.0));
+        let fs = 100.0;
+        let seq = |interval_s: f32| -> Vec<Peak> {
+            (0..5).map(|i| { let x = i as f32 * interval_s * fs; Peak { index: x as usize, x, y: 1.0 } }).collect()
+        };
+        // 210 bpm (286 ms) is within 40-220 bpm; 35 bpm (1714 ms) is not
+        let (fast, _) = extract_nn_runs(&[seq(0.286)], None, None, HrvOptions { fs_fallback: fs, ..opts });
+        assert_eq!(fast.iter().map(|r| r.intervals.len()).sum::<usize>(), 4);
+        let (slow, _) = extract_nn_runs(&[seq(1.714)], None, None, HrvOptions { fs_fallback: fs, ..opts });
+        assert!(slow.is_empty());
+    }
+
+    #[test]
+    fn test_resample_uses_beat_times() {
+        // A gap between the second and third interval keeps the full 3 s span
+        let resampled = resample_nn_intervals(&[1000.0, 1000.0, 1000.0], &[1.0, 2.0, 4.0], 1.0);
+        assert_eq!(resampled, vec![1000.0, 1000.0, 1000.0]);
+    }
+
+    #[test]
+    fn test_resample_matches_scipy_natural_spline() {
+        // scipy.interpolate.CubicSpline(t - 10, y, bc_type='natural')(np.arange(0, 3.6, 0.5))
+        let times = [10.0, 10.8, 11.7, 12.5, 13.6];
+        let intervals = [800.0, 900.0, 850.0, 950.0, 870.0];
+        let expected = [800.0, 881.2636, 892.6152, 851.8352, 880.1638, 950.0, 946.5644];
+        let resampled = resample_nn_intervals(&intervals, &times, 2.0);
+        assert_eq!(resampled.len(), expected.len());
+        for (a, b) in resampled.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-2, "{} vs {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_extract_nn_runs_split_at_rejected_interval() {
+        // Peaks 1 s apart except one extra beat, giving intervals 1000, 1000, 400, 600, 1000, 1000 ms
+        let times = [0.0, 1.0, 2.0, 2.4, 3.0, 4.0, 5.0];
+        let fs = 10.0;
+        let peaks: Vec<Peak> = times.iter().map(|&t| Peak { index: (t * fs) as usize, x: t * fs, y: 1.0 }).collect();
+        let (runs, _) = extract_nn_runs(&[peaks], None, None, HrvOptions { fs_fallback: fs, ..Default::default() });
+        assert_eq!(runs, vec![
+            NnRun { intervals: vec![1000.0, 1000.0], times: vec![1.0, 2.0] },
+            NnRun { intervals: vec![1000.0, 1000.0], times: vec![4.0, 5.0] },
+        ]);
+    }
+
+    #[test]
+    fn test_extract_nn_runs_split_between_sequences() {
+        let fs = 10.0;
+        let seq = |start: f32| -> Vec<Peak> {
+            (0..3).map(|i| { let x = (start + i as f32) * fs; Peak { index: x as usize, x, y: 1.0 } }).collect()
+        };
+        let (runs, _) = extract_nn_runs(&[seq(0.0), seq(10.0)], None, None, HrvOptions { fs_fallback: fs, ..Default::default() });
+        assert_eq!(runs.len(), 2);
+    }
+
+    #[test]
+    fn test_rmssd_only_pairs_consecutive_intervals() {
+        // Runs 800, 820 and 1000, 1020: successive differences are 20 and 20, not 180 across the gap
+        let runs = vec![
+            NnRun { intervals: vec![800.0, 820.0], times: vec![0.8, 1.62] },
+            NnRun { intervals: vec![1000.0, 1020.0], times: vec![3.0, 4.02] },
+        ];
+        let rmssd = calculate_metric(crate::registry::HrvMetric::Rmssd, &runs);
+        assert!((rmssd - 20.0).abs() < 1e-4);
+        let pnn50 = calculate_metric(crate::registry::HrvMetric::Pnn50, &runs);
+        assert_eq!(pnn50, 0.0);
     }
 
     #[test]
@@ -780,13 +996,15 @@ mod tests {
 
     #[test]
     fn test_resample_logic_accuracy() {
-        let intervals = vec![1000.0; 10]; 
-        let resampled = resample_nn_intervals(&intervals, 4.0);
-        
+        let intervals = vec![1000.0; 10];
+        let times: Vec<f64> = (1..=10).map(|t| t as f64).collect();
+        let resampled = resample_nn_intervals(&intervals, &times, 4.0);
+
         for &val in &resampled {
             assert!((val - 1000.0).abs() < 0.1);
         }
-        assert!(resampled.len() >= 39 && resampled.len() <= 41);
+        // 9 s from the first to the last beat at 4 Hz
+        assert_eq!(resampled.len(), 36);
     }
 
     #[test]

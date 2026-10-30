@@ -244,7 +244,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::LfHf),
-                min_window_seconds: 55.0,
+                // The LF band needs about 2 minutes (Task Force 1996)
+                min_window_seconds: 120.0,
                 preferred_window_seconds: 120.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,
@@ -266,7 +267,8 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Sd1Sd2),
-                min_window_seconds: 55.0,
+                // SD2 reflects long-term variability and needs as much data as LF/HF
+                min_window_seconds: 120.0,
                 preferred_window_seconds: 120.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,

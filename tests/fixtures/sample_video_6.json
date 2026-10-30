@@ -22709,12 +22709,6 @@
         }
     },
     "vitals": {
-        "hrv_lfhf": {
-            "value": 1.29,
-            "unit": "unitless",
-            "confidence": 0.78,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
         "respiratory_rate": {
             "value": 21.5,
             "unit": "bpm",
@@ -22722,9 +22716,9 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "hrv_sdnn": {
-            "value": 32.82,
+            "value": 32.63,
             "unit": "ms",
-            "confidence": 0.78,
+            "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "heart_rate": {
@@ -22734,24 +22728,19 @@
             "note": "Legacy Verified (FFT-based)"
         },
         "hrv_rmssd": {
-            "value": 29.57,
+            "value": 29.63,
             "unit": "ms",
-            "confidence": 0.78,
+            "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "stress_index": {
             "value": 250.0,
-            "confidence": 0.78,
+            "confidence": 0.91,
             "note": "Ground Truth (Manual)"
         },
         "hrv_pnn50": {
-            "value": 9.52,
-            "confidence": 0.78,
-            "note": "Ground Truth (NeuroKit2 Verified)"
-        },
-        "hrv_sd1sd2": {
-            "value": 0.51,
-            "confidence": 0.78,
+            "value": 9.62,
+            "confidence": 0.91,
             "note": "Ground Truth (NeuroKit2 Verified)"
         },
         "ie_ratio": {

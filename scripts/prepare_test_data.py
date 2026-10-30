@@ -4,22 +4,35 @@ import numpy as np
 import matplotlib.pyplot as plt
 import neurokit2 as nk
 import vitallens_core
+from scipy.signal import butter, filtfilt
 
-VIRTUAL_FS = 1000.0 
-MIN_RR_MS = 300.0
-MAX_RR_MS = 2000.0
+VIRTUAL_FS = 1000.0
+# Interval limits follow the 40-220 bpm heart rate range, as in the core
+MIN_RR_MS = 60000.0 / 220.0
+MAX_RR_MS = 60000.0 / 40.0
 MAX_REL_CHANGE = 0.25
+# The core low-passes the PPG before HRV peak detection at max(3 Hz, 1.3 x HR)
+HRV_LOWPASS_HZ = 3.0
+HRV_LOWPASS_RATE_FACTOR = 1.3
 
 MIN_DURATION_THRESHOLDS = {
     "heart_rate": 5.0,
     "respiratory_rate": 10.0,
     "hrv_sdnn": 20.0,
     "hrv_rmssd": 20.0,
-    "hrv_pnn50": 20.0,
-    "hrv_sd1sd2": 55.0,
-    "hrv_lfhf": 55.0,
+    "hrv_pnn50": 30.0,
+    "hrv_sd1sd2": 120.0,
+    "hrv_lfhf": 120.0,
     "stress_index": 55.0
 }
+
+def lowpass_rust_parity(signal, fs, rate_hint):
+    """2nd-order Butterworth, forward-backward, matching the core's HRV low-pass."""
+    cutoff = HRV_LOWPASS_HZ if rate_hint is None else max(HRV_LOWPASS_HZ, HRV_LOWPASS_RATE_FACTOR * rate_hint / 60.0)
+    signal = np.asarray(signal, dtype=np.float64)
+    if cutoff >= fs / 2 or len(signal) <= 9:
+        return signal
+    return filtfilt(*butter(2, cutoff / (fs / 2)), signal)
 
 def refine_location_rust_parity(signal, idx):
     idx_int = int(round(idx))
@@ -55,85 +68,79 @@ def extract_intervals_rust_parity(peaks_indices, fs, confidence_array, conf_thre
             t1 = p1_idx_float / fs
             t2 = p2_idx_float / fs
             diff_ms = (t2 - t1) * 1000.0
-            
+
             if diff_ms > 0:
-                intervals.append(diff_ms)
+                intervals.append((diff_ms, t2))
                 used_confs.extend([float(c1), float(c2)])
-                
+
     min_conf_peaks = min(used_confs) if used_confs else 0.0
     return intervals, min_conf_peaks
 
-def filter_outliers_rust_parity(intervals_ms):
+def outlier_mask_rust_parity(intervals_ms):
     intervals_ms = [float(x) for x in intervals_ms]
-    if len(intervals_ms) < 2: return list(intervals_ms)
+    if len(intervals_ms) < 2: return [True] * len(intervals_ms)
 
     valid_range = [x for x in intervals_ms if MIN_RR_MS <= x <= MAX_RR_MS]
-    if not valid_range: return []
+    if not valid_range: return [False] * len(intervals_ms)
 
     valid_range.sort()
     mid_idx = len(valid_range) // 2
     median = valid_range[mid_idx]
 
-    filtered = []
-    last_accepted = median 
+    keep = []
+    last_accepted = median
 
     for curr in intervals_ms:
-        if curr < MIN_RR_MS or curr > MAX_RR_MS: continue
-        
-        diff = abs(curr - last_accepted)
-        if diff > last_accepted * MAX_REL_CHANGE: continue
-        
-        filtered.append(curr)
-        last_accepted = curr
+        ok = MIN_RR_MS <= curr <= MAX_RR_MS and abs(curr - last_accepted) <= last_accepted * MAX_REL_CHANGE
+        keep.append(ok)
+        if ok: last_accepted = curr
 
-    return filtered
+    return keep
 
 def calculate_neurokit_metrics(peaks_indices_float, fs, confidence_array, conf_threshold, label):
-    if len(peaks_indices_float) < 2: return {}
+    if len(peaks_indices_float) < 2: return {}, 0.0
 
-    raw_intervals_ms, min_conf_peaks = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)    
-    clean_rri_ms = filter_outliers_rust_parity(raw_intervals_ms)
-    
-    if len(clean_rri_ms) < 2: return {}, 0.0
+    raw_intervals, min_conf_peaks = extract_intervals_rust_parity(peaks_indices_float, fs, confidence_array, conf_threshold)
+    keep = outlier_mask_rust_parity([iv for iv, _ in raw_intervals])
+    clean = [x for x, k in zip(raw_intervals, keep) if k]
 
-    clean_peaks_ms = np.cumsum([0] + clean_rri_ms)
+    if len(clean) < 2: return {}, 0.0
+
+    # Intervals with the time of their ending beat: NeuroKit2 then only pairs truly consecutive
+    # intervals for successive differences, and places them correctly on the LF/HF time axis
+    rri = {"RRI": np.array([iv for iv, _ in clean]), "RRI_Time": np.array([t for _, t in clean])}
     metrics = {}
-    
+
     try:
-        td = nk.hrv_time(clean_peaks_ms, sampling_rate=VIRTUAL_FS)
+        td = nk.hrv_time(rri, sampling_rate=VIRTUAL_FS)
         metrics['hrv_sdnn'] = td['HRV_SDNN'].values[0]
         metrics['hrv_rmssd'] = td['HRV_RMSSD'].values[0]
         if 'HRV_pNN50' in td: metrics['hrv_pnn50'] = td['HRV_pNN50'].values[0]
-    except: pass
+    except Exception as e:
+        print(f"[{label}] Time domain error: {e}")
 
     try:
-        fd = nk.hrv_frequency(
-            clean_peaks_ms, 
-            sampling_rate=VIRTUAL_FS, 
-            normalize=True,
-            interpolation_order=1,
-            psd_method='fft'
-        )
+        fd = nk.hrv_frequency(rri, sampling_rate=VIRTUAL_FS, psd_method='fft')
         metrics['hrv_lfhf'] = fd['HRV_LFHF'].values[0]
     except Exception as e:
         print(f"[{label}] LF/HF Error: {e}")
-        
+
     try:
-        nl = nk.hrv_nonlinear(clean_peaks_ms, sampling_rate=VIRTUAL_FS)
-        if 'HRV_SI' in nl: metrics['stress_index'] = nl['HRV_SI'].values[0]
-        elif 'HRV_Baevsky' in nl: metrics['stress_index'] = nl['HRV_Baevsky'].values[0]
+        nl = nk.hrv_nonlinear(rri, sampling_rate=VIRTUAL_FS)
+        # NeuroKit2's HRV_SI is the slope index, not Baevsky's stress index, so it is not used
         if 'HRV_SD1SD2' in nl: metrics['hrv_sd1sd2'] = nl['HRV_SD1SD2'].values[0]
-    except: pass
-        
+    except Exception as e:
+        print(f"[{label}] Nonlinear error: {e}")
+
     avg_conf = float(np.mean(confidence_array)) if len(confidence_array) > 0 else 0.0
     final_conf = min(avg_conf, min_conf_peaks)
-    
+
     return metrics, final_conf
 
 class PeakAnnotator:
-    def __init__(self, raw_signal, fs, title, rate_hint=None, 
-                 min_rate=40.0, max_rate=220.0, detection_threshold=0.45, 
-                 window_cycles=2.5, max_rate_change=1.0):
+    def __init__(self, raw_signal, fs, title, rate_hint=None,
+                 min_rate=40.0, max_rate=220.0, detection_threshold=0.45,
+                 window_cycles=2.5, max_rate_change=1.0, interactive=True, existing_peaks=None):
         self.raw_signal = np.array(raw_signal)
         self.fs = fs
         self.title = title
@@ -152,8 +159,15 @@ class PeakAnnotator:
             max_rate_change=max_rate_change
         )
         self.peaks = sorted(detected_peaks)
-        
+
         print(f"[{title}] Found {len(self.peaks)} raw peaks.")
+
+        if existing_peaks:
+            self.peaks = self.snap_to_detections(existing_peaks, self.peaks)
+            print(f"[{title}] Starting from {len(self.peaks)} existing annotations.")
+
+        if not interactive:
+            return
 
         self.fig, self.ax = plt.subplots(figsize=(12, 6))
         self.t = np.arange(len(self.raw_signal))
@@ -164,6 +178,18 @@ class PeakAnnotator:
         self.update_plot()
         self.cid = self.fig.canvas.mpl_connect('button_press_event', self.on_click)
         plt.show()
+
+    def snap_to_detections(self, annotated, detected, tolerance_s=0.15):
+        """Keeps the annotated beats, taking sub-sample positions from the nearest detection or local refinement."""
+        detected = np.asarray(detected)
+        snapped = []
+        for a in annotated:
+            if len(detected) and np.min(np.abs(detected - a)) <= tolerance_s * self.fs:
+                snapped.append(float(detected[np.argmin(np.abs(detected - a))]))
+            else:
+                lo, hi = max(0, int(a) - 2), min(len(self.raw_signal), int(a) + 3)
+                snapped.append(refine_location_rust_parity(self.raw_signal, lo + int(np.argmax(self.raw_signal[lo:hi]))))
+        return sorted(snapped)
 
     def update_plot(self):
         if self.peaks:
@@ -201,6 +227,7 @@ class PeakAnnotator:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("file", help="Path to the JSON file")
+    parser.add_argument("--no-gui", action="store_true", help="Accept the auto-detected peaks without annotation")
     args = parser.parse_args()
 
     try:
@@ -230,16 +257,21 @@ def main():
         conf_arr = wave.get("confidence")
         
         CONF_THRESH = 0.5
-        
+        hr_hint = vitals.get("heart_rate", {}).get("value")
+
+        # Annotate on the low-passed waveform so peak positions match what the core uses for HRV
         annotator = PeakAnnotator(
-            wave["data"], fs, "PPG (Heart Rate)", 
-            rate_hint=vitals.get("heart_rate", {}).get("value"),
+            lowpass_rust_parity(wave["data"], fs, hr_hint), fs, "PPG (Heart Rate)",
+            rate_hint=hr_hint,
             min_rate=40.0, max_rate=220.0, detection_threshold=0.35,
-            window_cycles=2.5, max_rate_change=1.0
+            window_cycles=2.5, max_rate_change=1.0, interactive=not args.no_gui,
+            existing_peaks=wave.get("peak_indices")
         )
         
         peaks_float = annotator.peaks
-        wave["peak_indices"] = [int(round(p)) for p in peaks_float]
+        # Without the GUI, existing annotations are kept as they are
+        if not (args.no_gui and wave.get("peak_indices")):
+            wave["peak_indices"] = [int(round(p)) for p in peaks_float]
         
         confidence_data = np.array(conf_arr, dtype=np.float32) if conf_arr else np.ones(len(wave["data"]))
         
@@ -247,7 +279,7 @@ def main():
             peaks_float, fs, confidence_data, CONF_THRESH, "PPG"
         )
         
-        for key in ["heart_rate", "hrv_sdnn", "hrv_rmssd", "hrv_lfhf", "stress_index", "hrv_pnn50", "hrv_sd1sd2"]:
+        for key in ["heart_rate", "hrv_sdnn", "hrv_rmssd", "hrv_lfhf", "hrv_pnn50", "hrv_sd1sd2"]:
             min_dur = MIN_DURATION_THRESHOLDS.get(key, 0)
             if duration_sec < min_dur:
                 if key in vitals: del vitals[key]
@@ -270,9 +302,11 @@ def main():
             wave["data"], fs, "Respiratory Rate", 
             rate_hint=vitals.get("respiratory_rate", {}).get("value"),
             min_rate=3.0, max_rate=60.0, detection_threshold=1.2,
-            window_cycles=1.5, max_rate_change=0.25
+            window_cycles=1.5, max_rate_change=0.25, interactive=not args.no_gui,
+            existing_peaks=wave.get("peak_indices")
         )
-        wave["peak_indices"] = [int(round(p)) for p in annotator.peaks]
+        if not (args.no_gui and wave.get("peak_indices")):
+            wave["peak_indices"] = [int(round(p)) for p in annotator.peaks]
         
         key = "respiratory_rate"
         if duration_sec < MIN_DURATION_THRESHOLDS[key]:

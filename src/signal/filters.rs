@@ -281,6 +281,64 @@ pub fn standardize(signal: &[f32]) -> Vec<f32> {
         .collect()
 }
 
+/// Applies a zero-phase, second-order Butterworth low-pass filter (forward-backward).
+///
+/// Matches `scipy.signal.filtfilt(*butter(2, cutoff / (fs / 2)), signal)`, including its
+/// odd-extension padding and steady-state initial conditions.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `fs` - The sampling frequency in Hz.
+/// * `cutoff` - The low-pass cutoff frequency in Hz.
+///
+/// # Returns
+/// A new `Vec<f32>` containing the filtered signal, or a copy of the input if the cutoff
+/// is not below the Nyquist frequency or the signal is too short to pad.
+pub fn lowpass_filtfilt(signal: &[f32], fs: f32, cutoff: f32) -> Vec<f32> {
+    const PADLEN: usize = 9; // 3 * number of coefficients, as in scipy
+    let n = signal.len();
+    if fs <= 0.0 || cutoff <= 0.0 || cutoff >= fs / 2.0 || n <= PADLEN {
+        return signal.to_vec();
+    }
+
+    // Bilinear-transform coefficients with frequency pre-warping
+    let k = (std::f64::consts::PI * cutoff as f64 / fs as f64).tan();
+    let norm = 1.0 / (1.0 + std::f64::consts::SQRT_2 * k + k * k);
+    let b0 = k * k * norm;
+    let b = [b0, 2.0 * b0, b0];
+    let a1 = 2.0 * (k * k - 1.0) * norm;
+    let a2 = (1.0 - std::f64::consts::SQRT_2 * k + k * k) * norm;
+
+    // Steady-state initial conditions for a unit step (scipy.signal.lfilter_zi)
+    let zi0 = (b[1] - a1 * b[0] + b[2] - a2 * b[0]) / (1.0 + a1 + a2);
+    let zi1 = b[2] - a2 * b[0] - a2 * zi0;
+
+    let lfilter = |x: &[f64]| -> Vec<f64> {
+        let (mut z0, mut z1) = (zi0 * x[0], zi1 * x[0]);
+        x.iter().map(|&xi| {
+            let yi = b[0] * xi + z0;
+            z0 = b[1] * xi - a1 * yi + z1;
+            z1 = b[2] * xi - a2 * yi;
+            yi
+        }).collect()
+    };
+
+    // Odd extension at both ends
+    let first = signal[0] as f64;
+    let last = signal[n - 1] as f64;
+    let mut ext = Vec::with_capacity(n + 2 * PADLEN);
+    ext.extend((1..=PADLEN).rev().map(|i| 2.0 * first - signal[i] as f64));
+    ext.extend(signal.iter().map(|&v| v as f64));
+    ext.extend((1..=PADLEN).map(|i| 2.0 * last - signal[n - 1 - i] as f64));
+
+    let mut y = lfilter(&ext);
+    y.reverse();
+    let mut y = lfilter(&y);
+    y.reverse();
+
+    y[PADLEN..PADLEN + n].iter().map(|&v| v as f32).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,5 +562,42 @@ mod tests {
             .count();
         
         assert!(crossings >= 4 && crossings <= 10, "Expected ~6 crossings for 1Hz, got {}", crossings);
+    }
+
+    #[test]
+    fn test_lowpass_filtfilt_matches_scipy() {
+        // scipy.signal.filtfilt(*butter(2, 3.0 / 15.0), x) for this x at 30 Hz
+        let x = [0.5, -0.25131, 0.981754, 0.184547, 1.344328, 0.451057, 1.498027, 0.482287, 1.404827, 0.270513,
+                 1.087785, -0.131875, 0.625333, -0.625333, 0.131875, -1.087785, -0.270513, -1.404827, -0.482287, -1.498027];
+        let expected = [0.496797, 0.527541, 0.590997, 0.688928, 0.798146, 0.889929, 0.940598, 0.93565, 0.870129, 0.747247,
+                        0.576418, 0.371153, 0.146771, -0.082279, -0.305608, -0.520232, -0.732942, -0.959376, -1.216354, -1.50341];
+        let y = lowpass_filtfilt(&x, 30.0, 3.0);
+        for (a, b) in y.iter().zip(expected.iter()) {
+            assert!((a - b).abs() < 1e-4, "Got {}, expected {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_lowpass_filtfilt_zero_phase() {
+        // A 1 Hz sine keeps its peak positions; a 10 Hz component is removed
+        let fs = 30.0;
+        let signal: Vec<f32> = (0..300).map(|i| {
+            let t = i as f32 / fs;
+            (2.0 * std::f32::consts::PI * t).sin() + 0.5 * (2.0 * std::f32::consts::PI * 10.0 * t).sin()
+        }).collect();
+        let y = lowpass_filtfilt(&signal, fs, 3.0);
+        for i in 60..240 {
+            let clean = (2.0 * std::f32::consts::PI * i as f32 / fs).sin();
+            assert!((y[i] - clean).abs() < 0.05, "Sample {}: got {}, expected {}", i, y[i], clean);
+        }
+    }
+
+    #[test]
+    fn test_lowpass_filtfilt_passthrough() {
+        let short = vec![1.0, 2.0, 3.0];
+        assert_eq!(lowpass_filtfilt(&short, 30.0, 3.0), short);
+        let signal: Vec<f32> = (0..50).map(|i| i as f32).collect();
+        // Cutoff at or above Nyquist leaves the signal unchanged
+        assert_eq!(lowpass_filtfilt(&signal, 5.0, 3.0), signal);
     }
 }
