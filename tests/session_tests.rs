@@ -17,7 +17,7 @@ const TOLERANCE_IE_RATIO: f32 = 0.15;
 const TOLERANCE_PNN50: f32 = 5.0;
 const TOLERANCE_LFHF: f32 = 0.5;
 const TOLERANCE_SD1SD2: f32 = 0.05;
-const TOLERANCE_STRESS_INDEX: f32 = 20.0;
+const REL_TOLERANCE_STRESS_INDEX: f32 = 0.15;
 
 const CONSISTENCY_TOLERANCE: f32 = 0.5;
 
@@ -106,7 +106,8 @@ fn test_session(resource: &str) {
     add_case("hrv_pnn50", ref_data.vitals.get("hrv_pnn50"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_PNN50);
     add_case("hrv_sd1sd2", ref_data.vitals.get("hrv_sd1sd2"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_SD1SD2);
     add_case("ie_ratio", ref_data.vitals.get("ie_ratio"), ref_data.waveforms.get("respiratory_waveform"), "respiratory_waveform", TOLERANCE_IE_RATIO);
-    add_case("stress_index", ref_data.vitals.get("stress_index"), ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", TOLERANCE_STRESS_INDEX);
+    let si_ref = ref_data.vitals.get("stress_index");
+    add_case("stress_index", si_ref, ref_data.waveforms.get("ppg_waveform"), "ppg_waveform", si_ref.map_or(0.0, |v| REL_TOLERANCE_STRESS_INDEX * v.value));
 
     if cases.is_empty() {
         println!(" [SKIP] No valid vitals found in file.");

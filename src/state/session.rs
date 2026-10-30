@@ -12,6 +12,11 @@ use pyo3::prelude::*;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+/// History kept in streaming modes when no active vital needs more, in seconds.
+const DEFAULT_HISTORY_SECONDS: f32 = 60.0;
+/// Upper bound on the history kept in streaming modes, in seconds.
+const MAX_HISTORY_SECONDS: f32 = 300.0;
+
 /// Internal state engine for a continuous tracking session.
 /// Manages historical buffers, timestamps, and calculates vitals iteratively.
 #[derive(Debug)]
@@ -42,8 +47,6 @@ impl SessionCore {
     /// # Returns
     /// A new `SessionCore` instance.
     fn new(config: SessionConfig) -> Self {
-        let max_history = (config.fps_target * 60.0) as usize;
-        
         let mut resolved_metas = Vec::new();
         let mut meta_map = HashMap::new();
 
@@ -53,7 +56,13 @@ impl SessionCore {
                 resolved_metas.push(meta);
             }
         }
-        
+
+        let longest_min_window = resolved_metas.iter()
+            .flat_map(|m| m.derivations.iter().map(|d| d.min_window_seconds))
+            .fold(DEFAULT_HISTORY_SECONDS, f32::max)
+            .min(MAX_HISTORY_SECONDS);
+        let max_history = (config.fps_target * longest_min_window) as usize;
+
         resolved_metas.sort_by_key(|m| {
             m.derivations.first().map(|d| d.order).unwrap_or(0)
         });
@@ -871,6 +880,17 @@ mod tests {
             signals,
             face: None,
         }
+    }
+
+    #[test]
+    fn test_history_covers_longest_min_window() {
+        let core = SessionCore::new(mock_config(30.0));
+        assert_eq!(core.max_history, 30 * 60);
+
+        let mut config = mock_config(30.0);
+        config.supported_vitals = vec!["heart_rate".to_string(), "hrv_lfhf".to_string()];
+        let core = SessionCore::new(config);
+        assert_eq!(core.max_history, 30 * 120);
     }
 
     #[test]

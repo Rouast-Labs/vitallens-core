@@ -222,7 +222,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Pnn50),
-                min_window_seconds: 30.0,
+                min_window_seconds: 25.0,
                 preferred_window_seconds: 60.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,
@@ -244,7 +244,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::LfHf),
-                min_window_seconds: 55.0,
+                min_window_seconds: 120.0,
                 preferred_window_seconds: 120.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,
@@ -266,7 +266,7 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::Sd1Sd2),
-                min_window_seconds: 55.0,
+                min_window_seconds: 120.0,
                 preferred_window_seconds: 120.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,
@@ -310,11 +310,11 @@ pub fn get_vital_meta(vital_id: &str) -> Option<VitalMeta> {
             derivations: vec![DerivationConfig {
                 sources: vec!["ppg_waveform".to_string()],
                 method: CalculationMethod::HrvFromPeaks(HrvMetric::StressIndex),
-                min_window_seconds: 55.0,
-                preferred_window_seconds: 120.0,
+                min_window_seconds: 25.0,
+                preferred_window_seconds: 30.0,
                 rolling_stride_seconds: 5.0,
                 min_value: 0.0,
-                max_value: 1000.0,
+                max_value: 5000.0,
                 order: 1,
             }],
             processing: None,
