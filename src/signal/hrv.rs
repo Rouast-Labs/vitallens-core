@@ -11,6 +11,10 @@ const SI_WINDOW_SECONDS: f32 = 30.0;
 const SI_MIN_WINDOW_SECONDS: f32 = 25.0;
 /// Percentiles bounding the variation range in the stress index.
 const SI_RANGE_PERCENTILES: (f32, f32) = (5.0, 95.0);
+/// Frame gaps deviating from the average by more than this fraction count as irregular.
+const IRREGULAR_GAP_TOLERANCE: f64 = 0.1;
+/// Gaps longer than this are not bridged: resampled points inside them get zero confidence, in seconds.
+const MAX_BRIDGED_GAP_SECONDS: f64 = 0.25;
 
 /// Configuration options for extracting Normal-to-Normal (NN) intervals.
 #[derive(Debug, Clone, Copy)]
@@ -71,6 +75,19 @@ pub fn estimate_hrv(
     bounds: SignalBounds,
     rate_hint: Option<f32>
 ) -> (f32, f32) {
+    let avg_conf = if confidence.is_empty() {
+        0.0
+    } else {
+        confidence.iter().sum::<f32>() / confidence.len() as f32
+    };
+
+    // Filtering and peak refinement assume evenly spaced samples
+    let even = resample_irregular(signal, timestamps, confidence);
+    let (signal, fs, timestamps, confidence) = match &even {
+        Some(e) => (&e.signal[..], e.fs, &e.timestamps[..], &e.confidence[..]),
+        None => (signal, fs, timestamps, confidence),
+    };
+
     let options = PeakOptions {
         fs,
         bounds,
@@ -101,12 +118,6 @@ pub fn estimate_hrv(
     }
 
     let value = calculate_metric(metric, &runs);
-
-    let avg_conf = if confidence.is_empty() {
-        0.0
-    } else {
-        confidence.iter().sum::<f32>() / confidence.len() as f32
-    };
 
     let final_conf = avg_conf.min(min_conf_peaks);
 
@@ -744,18 +755,84 @@ fn resample_nn_intervals(nn_intervals: &[f32], times: &[f64], target_fs: f32) ->
 
         if cursor >= t.len() - 1 { break; }
 
-        let (x0, x1) = (t[cursor], t[cursor + 1]);
-        let (y0, y1) = (y[cursor], y[cursor + 1]);
-        let (m0, m1) = (m[cursor], m[cursor + 1]);
-        let h = x1 - x0;
-        let (a, b) = (x1 - t_u, t_u - x0);
-
-        let val = m0 * a.powi(3) / (6.0 * h) + m1 * b.powi(3) / (6.0 * h)
-            + (y0 / h - m0 * h / 6.0) * a + (y1 / h - m1 * h / 6.0) * b;
-        resampled.push(val as f32);
+        resampled.push(spline_eval(&t, &y, &m, cursor, t_u) as f32);
     }
 
     resampled
+}
+
+/// Evaluates a cubic spline with second derivatives `m` at `t_u`, inside the segment starting at `i`.
+fn spline_eval(t: &[f64], y: &[f64], m: &[f64], i: usize, t_u: f64) -> f64 {
+    let (x0, x1) = (t[i], t[i + 1]);
+    let (y0, y1) = (y[i], y[i + 1]);
+    let (m0, m1) = (m[i], m[i + 1]);
+    let h = x1 - x0;
+    let (a, b) = (x1 - t_u, t_u - x0);
+
+    m0 * a.powi(3) / (6.0 * h) + m1 * b.powi(3) / (6.0 * h)
+        + (y0 / h - m0 * h / 6.0) * a + (y1 / h - m1 * h / 6.0) * b
+}
+
+/// A signal resampled onto evenly spaced timestamps.
+struct EvenSignal {
+    signal: Vec<f32>,
+    confidence: Vec<f32>,
+    timestamps: Vec<f64>,
+    fs: f32,
+}
+
+/// Resamples a signal with irregular frame times onto an even grid at its average rate.
+///
+/// The signal is interpolated with a natural cubic spline and the confidence linearly.
+/// Points inside gaps longer than `MAX_BRIDGED_GAP_SECONDS` get zero confidence.
+///
+/// # Arguments
+/// * `signal` - The input time-domain signal.
+/// * `timestamps` - Frame times in seconds, strictly increasing.
+/// * `confidence` - Confidence per frame, or empty.
+///
+/// # Returns
+/// `None` if the frame times are already even within `IRREGULAR_GAP_TOLERANCE` or can't be resampled.
+fn resample_irregular(signal: &[f32], timestamps: &[f64], confidence: &[f32]) -> Option<EvenSignal> {
+    let n = signal.len();
+    if n < 3 || timestamps.len() != n || (!confidence.is_empty() && confidence.len() != n) { return None; }
+
+    let gaps: Vec<f64> = timestamps.windows(2).map(|w| w[1] - w[0]).collect();
+    if gaps.iter().any(|&g| g <= 0.0) { return None; }
+    let t0 = timestamps[0];
+    let t: Vec<f64> = timestamps.iter().map(|&x| x - t0).collect();
+    let duration = t[n - 1];
+    let step = duration / (n - 1) as f64;
+    if gaps.iter().all(|&g| (g - step).abs() <= IRREGULAR_GAP_TOLERANCE * step) { return None; }
+
+    let y: Vec<f64> = signal.iter().map(|&v| v as f64).collect();
+    let m = spline_second_derivatives(&t, &y);
+
+    let mut even = EvenSignal {
+        signal: Vec::with_capacity(n),
+        confidence: Vec::with_capacity(if confidence.is_empty() { 0 } else { n }),
+        timestamps: Vec::with_capacity(n),
+        fs: (1.0 / step) as f32,
+    };
+
+    let mut cursor = 0;
+    for i in 0..n {
+        let t_u = (i as f64 * step).min(duration);
+        while cursor < n - 2 && t[cursor + 1] < t_u {
+            cursor += 1;
+        }
+
+        even.signal.push(spline_eval(&t, &y, &m, cursor, t_u) as f32);
+        even.timestamps.push(t0 + t_u);
+        if !confidence.is_empty() {
+            let bridged = gaps[cursor] > MAX_BRIDGED_GAP_SECONDS && t_u > t[cursor] && t_u < t[cursor + 1];
+            let frac = ((t_u - t[cursor]) / gaps[cursor]) as f32;
+            let c = confidence[cursor] + (confidence[cursor + 1] - confidence[cursor]) * frac;
+            even.confidence.push(if bridged { 0.0 } else { c });
+        }
+    }
+
+    Some(even)
 }
 
 /// Second derivatives of a natural cubic spline through `(t, y)`, solved with the Thomas algorithm.
@@ -1375,5 +1452,58 @@ mod tests {
         assert!((vals[109] - 0.0).abs() < 0.1);
         assert!(vals[110].is_nan());
         assert!(vals[119].is_nan());
+    }
+
+    /// A pulse train at a constant 72 bpm, evaluated at the given times.
+    fn constant_pulse(times: &[f64]) -> Vec<f32> {
+        let period = 60.0 / 72.0;
+        times.iter().map(|&t| {
+            let phase = (t / period).fract() * period - period / 2.0;
+            (-phase * phase / (2.0 * 0.15 * 0.15)).exp() as f32
+        }).collect()
+    }
+
+    /// Frames of a 30 fps camera picked up by a free-running 9.4 Hz timer.
+    fn timer_frame_times(duration: f64) -> Vec<f64> {
+        (0..(duration * 9.4) as usize).map(|j| (j as f64 / 9.4 * 30.0).floor() / 30.0).collect()
+    }
+
+    #[test]
+    fn test_resample_irregular_leaves_even_frames() {
+        let even: Vec<f64> = (0..300).map(|i| i as f64 / 30.0).collect();
+        let jittered: Vec<f64> = even.iter().enumerate().map(|(i, &t)| t + if i % 2 == 0 { 0.001 } else { -0.001 }).collect();
+        let signal = vec![0.0; 300];
+
+        assert!(resample_irregular(&signal, &even, &[]).is_none());
+        assert!(resample_irregular(&signal, &jittered, &[]).is_none());
+    }
+
+    #[test]
+    fn test_estimate_hrv_irregular_frames_use_true_times() {
+        let timestamps = timer_frame_times(40.0);
+        let signal = constant_pulse(&timestamps);
+        let confidence = vec![1.0; signal.len()];
+        let fs = ((timestamps.len() - 1) as f64 / (timestamps[timestamps.len() - 1] - timestamps[0])) as f32;
+
+        let (rmssd, conf) = estimate_hrv(&signal, fs, crate::registry::HrvMetric::Rmssd, &timestamps, &confidence, heart_rate_bounds(), None);
+
+        assert!(conf > 0.9);
+        assert!(rmssd < 3.0, "constant pulse sampled irregularly gave RMSSD {}", rmssd);
+    }
+
+    #[test]
+    fn test_resample_irregular_does_not_bridge_long_gaps() {
+        let mut timestamps: Vec<f64> = (0..60).map(|i| i as f64 / 30.0).collect();
+        timestamps.extend((90..150).map(|i| i as f64 / 30.0));
+        let signal = constant_pulse(&timestamps);
+        let confidence = vec![1.0; timestamps.len()];
+
+        let even = resample_irregular(&signal, &timestamps, &confidence).unwrap();
+
+        assert_eq!(even.signal.len(), timestamps.len());
+        for (t, c) in even.timestamps.iter().zip(&even.confidence) {
+            let inside_gap = *t > timestamps[59] && *t < timestamps[60];
+            assert_eq!(*c == 0.0, inside_gap, "confidence {} at {}", c, t);
+        }
     }
 }
