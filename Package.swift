@@ -21,8 +21,8 @@ let package = Package(
         ),
         .binaryTarget(
             name: "VitalLensCoreFFI",
-            url: "https://github.com/Rouast-Labs/vitallens-core/releases/download/v0.4.1/VitalLensCoreFFI.xcframework.zip",
-            checksum: "b540ccb5261e0ed0d7fac7a856d38b0162b86ff60c2d30c575f8e8ad2b4d8771"
+            url: "https://github.com/Rouast-Labs/vitallens-core/releases/download/v0.4.2/VitalLensCoreFFI.xcframework.zip",
+            checksum: "d2122e7f4b09092d44fa9bd00315760c287409cc7a93201660954f059eb72ebc"
         )
     ]
 )

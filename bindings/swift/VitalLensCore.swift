@@ -3144,6 +3144,12 @@ public func computeIou(a: Rect, b: Rect) -> Float {
     )
 })
 }
+public func coreVersion() -> String {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_vitallens_core_fn_func_core_version($0
+    )
+})
+}
 public func getVitalInfo(vitalId: String) -> VitalInfo? {
     return try!  FfiConverterOptionTypeVitalInfo.lift(try! rustCall() {
     uniffi_vitallens_core_fn_func_get_vital_info(
@@ -3194,6 +3200,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_compute_iou() != 42017) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vitallens_core_checksum_func_core_version() != 32558) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_get_vital_info() != 31397) {
