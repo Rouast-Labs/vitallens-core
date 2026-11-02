@@ -22,6 +22,7 @@ pub fn register_functions(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_peaks, m)?)?;
     m.add_function(wrap_pyfunction!(calculate_roi, m)?)?;
     m.add_function(wrap_pyfunction!(get_vital_info, m)?)?;
+    m.add_function(wrap_pyfunction!(core_version, m)?)?;
     m.add_function(wrap_pyfunction!(py_compute_buffer_config, m)?)?;
     m.add_function(wrap_pyfunction!(detrend_lambda_for_cutoff, m)?)?;
     m.add_function(wrap_pyfunction!(moving_average_window_for_cutoff, m)?)?;
@@ -280,6 +281,11 @@ fn calculate_roi(
 #[pyfunction]
 fn get_vital_info(_py: Python, vital_id: &str) -> PyResult<Option<VitalInfo>> {
     Ok(crate::get_vital_info(vital_id.to_string()))
+}
+
+#[pyfunction]
+fn core_version(_py: Python) -> PyResult<String> {
+    Ok(crate::core_version())
 }
 
 #[pyfunction]
