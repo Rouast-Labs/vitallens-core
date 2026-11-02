@@ -112,4 +112,5 @@ print(f"Calculated ROI: x={roi.x}, y={roi.y}, w={roi.width}, h={roi.height}")
 # Metadata
 meta = vc.get_vital_info("heart_rate")
 print(f"Vital ID: {meta.id}, Display Name: {meta.display_name}, Unit: {meta.unit}")
+print(f"vitallens-core {vc.core_version()}")  # also vc.__version__
 ```

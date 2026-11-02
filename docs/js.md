@@ -70,10 +70,11 @@ function onInferenceResult(mlOutput) {
 Access metadata and geometry helpers directly:
 
 ```javascript
-import { calculateRoi } from './pkg/vitallens_core.js';
+import { calculateRoi, coreVersion } from './pkg/vitallens_core.js';
 
 const faceRect = { x: 100, y: 100, width: 80, height: 120 };
 const roi = calculateRoi(faceRect, "forehead", "default", 1920, 1080, true);
+const version = coreVersion(); // e.g. "0.4.2"
 ```
 
 ## Data Structures

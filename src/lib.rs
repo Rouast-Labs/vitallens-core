@@ -40,6 +40,17 @@ pub fn get_vital_info_js(vital_id: &str) -> JsValue {
     serde_wasm_bindgen::to_value(&info).unwrap()
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), uniffi::export)]
+pub fn core_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = coreVersion)]
+pub fn core_version_js() -> String {
+    core_version()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 uniffi::setup_scaffolding!();
 
@@ -72,6 +83,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<state::frames::BufferPlanner>()?;
 
     bindings::python::register_functions(m)?;
-    
+    m.add("__version__", core_version())?;
+
     Ok(())
 }
