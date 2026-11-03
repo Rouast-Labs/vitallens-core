@@ -102,3 +102,32 @@ class VitalLensProcessor {
     }
 }
 ```
+
+## Frame Preparation
+
+Crops a frame to the ROI, converts it to RGB, area-averages it down to the model input size, then rotates and mirrors it, in one pass. Each output pixel is the exact mean of the source pixels it covers, with partially covered pixels weighted by their covered fraction (like OpenCV `INTER_AREA`); integer arithmetic gives identical bytes on every platform. The crop is in pixels of the raw (unrotated) frame, the output size is the size after rotation, rotation is clockwise (0, 90, 180, 270), then mirroring. The result is packed RGB bytes (`out_width * out_height * 3`, row-major).
+
+Formats: `.bgra` (`kCVPixelFormatType_32BGRA`), `.rgba`, `.argb`, `.rgb`, `.bgr` (one plane) and `.yuv420` (Y, U, V planes with any row and pixel strides, e.g. the two planes of a 420f buffer passed as Y, CbCr, CbCr+1 with pixel stride 2).
+
+`prepareFrameFromAddresses` reads the pixel buffer in place, without copying it across the FFI; keep the base address locked until the call returns. `prepareFrameFromPlanes` takes `Data` instead (copied); use it for tests.
+
+```swift
+// pixelBuffer: a kCVPixelFormatType_32BGRA CVPixelBuffer
+CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+let plane = FramePlaneAddress(
+    address: UInt64(UInt(bitPattern: CVPixelBufferGetBaseAddress(pixelBuffer))),
+    length: UInt64(CVPixelBufferGetDataSize(pixelBuffer)),
+    rowStride: UInt32(CVPixelBufferGetBytesPerRow(pixelBuffer)),
+    pixelStride: 4
+)
+let rgb: Data = try prepareFrameFromAddresses(
+    planes: [plane],
+    width: UInt32(CVPixelBufferGetWidth(pixelBuffer)),
+    height: UInt32(CVPixelBufferGetHeight(pixelBuffer)),
+    format: .bgra, yuvMatrix: .bt601Full,
+    crop: PixelRect(x: 100, y: 60, width: 300, height: 300),
+    outWidth: 40, outHeight: 40,
+    orientation: Orientation(rotationDegrees: 0, mirrored: false)
+)
+```

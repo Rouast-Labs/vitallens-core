@@ -77,6 +77,26 @@ const roi = calculateRoi(faceRect, "forehead", "default", 1920, 1080, true);
 const version = coreVersion(); // e.g. "0.4.2"
 ```
 
+### 4. Frame Preparation
+
+Crops a frame to the ROI, converts it to RGB, area-averages it down to the model input size, then rotates and mirrors it, in one pass. Each output pixel is the exact mean of the source pixels it covers, with partially covered pixels weighted by their covered fraction (like OpenCV `INTER_AREA`); integer arithmetic gives identical bytes on every platform. The crop is in pixels of the raw (unrotated) frame, the output size is the size after rotation, rotation is clockwise (0, 90, 180, 270), then mirroring. The result is packed RGB bytes (`out_width * out_height * 3`, row-major).
+
+Formats: `"rgba"` (canvas `ImageData`), `"bgra"`, `"argb"`, `"rgb"`, `"bgr"` (one plane).
+
+The bytes are copied into wasm memory once per call. In the browser, a GPU path (such as TF.js `avgPool`) can be cheaper than reading pixels back to the CPU.
+
+```javascript
+import { prepareFrame } from './pkg/vitallens_core.js';
+
+const img = ctx.getImageData(0, 0, width, height);
+const rgb = prepareFrame(
+  img.data, width, height, width * 4, "rgba",
+  100, 60, 300, 300, // crop x, y, width, height
+  40, 40,            // output width, height
+  0, false           // rotation (degrees clockwise), mirrored
+); // Uint8Array of 40 * 40 * 3
+```
+
 ## Data Structures
 
 * **SessionResult**: Returns `waveforms` and `vitals` as Objects (Maps).

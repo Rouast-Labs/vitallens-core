@@ -27,6 +27,7 @@ This core compiles directly into the native formats required by our clients:
 If you are looking to integrate this core into a specific environment, refer to the dedicated guides:
 
 - [🍎 iOS / Swift Implementation Guide](docs/ios.md)
+- [🤖 Android / Kotlin Implementation Guide](docs/kotlin.md)
 - [🕸️ Web / JS Implementation Guide](docs/js.md)
 - [🐍 Python Implementation Guide](docs/python.md)
 
