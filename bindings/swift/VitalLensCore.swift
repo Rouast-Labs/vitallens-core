@@ -525,6 +525,24 @@ fileprivate struct FfiConverterString: FfiConverter {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterData: FfiConverterRustBuffer {
+    typealias SwiftType = Data
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Data {
+        let len: Int32 = try readInt(&buf)
+        return Data(try readBytes(&buf, count: Int(len)))
+    }
+
+    public static func write(_ value: Data, into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        writeBytes(&buf, value)
+    }
+}
+
 
 
 
@@ -1408,6 +1426,170 @@ public func FfiConverterTypeFaceResult_lower(_ value: FaceResult) -> RustBuffer 
 
 
 /**
+ * A frame plane passed by copy.
+ */
+public struct FramePlane {
+    public var data: Data
+    public var rowStride: UInt32
+    public var pixelStride: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(data: Data, rowStride: UInt32, pixelStride: UInt32) {
+        self.data = data
+        self.rowStride = rowStride
+        self.pixelStride = pixelStride
+    }
+}
+
+
+
+extension FramePlane: Equatable, Hashable {
+    public static func ==(lhs: FramePlane, rhs: FramePlane) -> Bool {
+        if lhs.data != rhs.data {
+            return false
+        }
+        if lhs.rowStride != rhs.rowStride {
+            return false
+        }
+        if lhs.pixelStride != rhs.pixelStride {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(data)
+        hasher.combine(rowStride)
+        hasher.combine(pixelStride)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFramePlane: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FramePlane {
+        return
+            try FramePlane(
+                data: FfiConverterData.read(from: &buf), 
+                rowStride: FfiConverterUInt32.read(from: &buf), 
+                pixelStride: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FramePlane, into buf: inout [UInt8]) {
+        FfiConverterData.write(value.data, into: &buf)
+        FfiConverterUInt32.write(value.rowStride, into: &buf)
+        FfiConverterUInt32.write(value.pixelStride, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFramePlane_lift(_ buf: RustBuffer) throws -> FramePlane {
+    return try FfiConverterTypeFramePlane.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFramePlane_lower(_ value: FramePlane) -> RustBuffer {
+    return FfiConverterTypeFramePlane.lower(value)
+}
+
+
+/**
+ * A frame plane passed by address, so the frame is read in place without copying it across
+ * the FFI. The caller must keep `length` bytes at `address` valid and unmodified for the
+ * duration of the call (e.g. an open `ImageProxy`/`Image`, a locked `CVPixelBuffer`).
+ */
+public struct FramePlaneAddress {
+    public var address: UInt64
+    public var length: UInt64
+    public var rowStride: UInt32
+    public var pixelStride: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(address: UInt64, length: UInt64, rowStride: UInt32, pixelStride: UInt32) {
+        self.address = address
+        self.length = length
+        self.rowStride = rowStride
+        self.pixelStride = pixelStride
+    }
+}
+
+
+
+extension FramePlaneAddress: Equatable, Hashable {
+    public static func ==(lhs: FramePlaneAddress, rhs: FramePlaneAddress) -> Bool {
+        if lhs.address != rhs.address {
+            return false
+        }
+        if lhs.length != rhs.length {
+            return false
+        }
+        if lhs.rowStride != rhs.rowStride {
+            return false
+        }
+        if lhs.pixelStride != rhs.pixelStride {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(address)
+        hasher.combine(length)
+        hasher.combine(rowStride)
+        hasher.combine(pixelStride)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFramePlaneAddress: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FramePlaneAddress {
+        return
+            try FramePlaneAddress(
+                address: FfiConverterUInt64.read(from: &buf), 
+                length: FfiConverterUInt64.read(from: &buf), 
+                rowStride: FfiConverterUInt32.read(from: &buf), 
+                pixelStride: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: FramePlaneAddress, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.address, into: &buf)
+        FfiConverterUInt64.write(value.length, into: &buf)
+        FfiConverterUInt32.write(value.rowStride, into: &buf)
+        FfiConverterUInt32.write(value.pixelStride, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFramePlaneAddress_lift(_ buf: RustBuffer) throws -> FramePlaneAddress {
+    return try FfiConverterTypeFramePlaneAddress.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFramePlaneAddress_lower(_ value: FramePlaneAddress) -> RustBuffer {
+    return FfiConverterTypeFramePlaneAddress.lower(value)
+}
+
+
+/**
  * Command returned by the BufferPlanner indicating how many frames to extract.
  */
 public struct InferenceCommand {
@@ -1481,6 +1663,172 @@ public func FfiConverterTypeInferenceCommand_lift(_ buf: RustBuffer) throws -> I
 #endif
 public func FfiConverterTypeInferenceCommand_lower(_ value: InferenceCommand) -> RustBuffer {
     return FfiConverterTypeInferenceCommand.lower(value)
+}
+
+
+/**
+ * Rotation and mirroring applied after downsampling, to bring the raw frame upright.
+ */
+public struct Orientation {
+    /**
+     * Clockwise rotation in degrees: 0, 90, 180 or 270.
+     */
+    public var rotationDegrees: UInt32
+    /**
+     * Mirror horizontally after rotating.
+     */
+    public var mirrored: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Clockwise rotation in degrees: 0, 90, 180 or 270.
+         */rotationDegrees: UInt32, 
+        /**
+         * Mirror horizontally after rotating.
+         */mirrored: Bool) {
+        self.rotationDegrees = rotationDegrees
+        self.mirrored = mirrored
+    }
+}
+
+
+
+extension Orientation: Equatable, Hashable {
+    public static func ==(lhs: Orientation, rhs: Orientation) -> Bool {
+        if lhs.rotationDegrees != rhs.rotationDegrees {
+            return false
+        }
+        if lhs.mirrored != rhs.mirrored {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(rotationDegrees)
+        hasher.combine(mirrored)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOrientation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Orientation {
+        return
+            try Orientation(
+                rotationDegrees: FfiConverterUInt32.read(from: &buf), 
+                mirrored: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: Orientation, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.rotationDegrees, into: &buf)
+        FfiConverterBool.write(value.mirrored, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientation_lift(_ buf: RustBuffer) throws -> Orientation {
+    return try FfiConverterTypeOrientation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOrientation_lower(_ value: Orientation) -> RustBuffer {
+    return FfiConverterTypeOrientation.lower(value)
+}
+
+
+/**
+ * A rectangle in pixel coordinates of the source frame (raw, unrotated orientation).
+ */
+public struct PixelRect {
+    public var x: UInt32
+    public var y: UInt32
+    public var width: UInt32
+    public var height: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(x: UInt32, y: UInt32, width: UInt32, height: UInt32) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
+
+
+extension PixelRect: Equatable, Hashable {
+    public static func ==(lhs: PixelRect, rhs: PixelRect) -> Bool {
+        if lhs.x != rhs.x {
+            return false
+        }
+        if lhs.y != rhs.y {
+            return false
+        }
+        if lhs.width != rhs.width {
+            return false
+        }
+        if lhs.height != rhs.height {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(x)
+        hasher.combine(y)
+        hasher.combine(width)
+        hasher.combine(height)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePixelRect: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PixelRect {
+        return
+            try PixelRect(
+                x: FfiConverterUInt32.read(from: &buf), 
+                y: FfiConverterUInt32.read(from: &buf), 
+                width: FfiConverterUInt32.read(from: &buf), 
+                height: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PixelRect, into buf: inout [UInt8]) {
+        FfiConverterUInt32.write(value.x, into: &buf)
+        FfiConverterUInt32.write(value.y, into: &buf)
+        FfiConverterUInt32.write(value.width, into: &buf)
+        FfiConverterUInt32.write(value.height, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePixelRect_lift(_ buf: RustBuffer) throws -> PixelRect {
+    return try FfiConverterTypePixelRect.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePixelRect_lower(_ value: PixelRect) -> RustBuffer {
+    return FfiConverterTypePixelRect.lower(value)
 }
 
 
@@ -2404,6 +2752,61 @@ extension FaceDetector: Equatable, Hashable {}
 
 
 
+
+public enum FrameError {
+
+    
+    
+    case InvalidInput(message: String)
+    
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFrameError: FfiConverterRustBuffer {
+    typealias SwiftType = FrameError
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FrameError {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        
+
+        
+        case 1: return .InvalidInput(
+            message: try FfiConverterString.read(from: &buf)
+        )
+        
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: FrameError, into buf: inout [UInt8]) {
+        switch value {
+
+        
+
+        
+        case .InvalidInput(_ /* message is ignored*/):
+            writeInt(&buf, Int32(1))
+
+        
+        }
+    }
+}
+
+
+extension FrameError: Equatable, Hashable {}
+
+extension FrameError: Foundation.LocalizedError {
+    public var errorDescription: String? {
+        String(reflecting: self)
+    }
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
@@ -2468,6 +2871,121 @@ public func FfiConverterTypeInferenceMode_lower(_ value: InferenceMode) -> RustB
 
 
 extension InferenceMode: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Pixel layout of a frame.
+ */
+
+public enum PixelFormat {
+    
+    /**
+     * One plane, 3 bytes per pixel: R, G, B.
+     */
+    case rgb
+    /**
+     * One plane, 3 bytes per pixel: B, G, R.
+     */
+    case bgr
+    /**
+     * One plane, 4 bytes per pixel: R, G, B, A (Android `RGBA_8888`, canvas `ImageData`).
+     */
+    case rgba
+    /**
+     * One plane, 4 bytes per pixel: B, G, R, A (iOS `kCVPixelFormatType_32BGRA`).
+     */
+    case bgra
+    /**
+     * One plane, 4 bytes per pixel: A, R, G, B.
+     */
+    case argb
+    /**
+     * Three planes Y, U, V; chroma subsampled 2x2. Any row and pixel strides, so this covers
+     * I420 (planar), NV12 and NV21 (interleaved chroma, pixel stride 2), i.e. Android
+     * `YUV_420_888` and the planes of `MediaCodec` output images.
+     */
+    case yuv420
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePixelFormat: FfiConverterRustBuffer {
+    typealias SwiftType = PixelFormat
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PixelFormat {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .rgb
+        
+        case 2: return .bgr
+        
+        case 3: return .rgba
+        
+        case 4: return .bgra
+        
+        case 5: return .argb
+        
+        case 6: return .yuv420
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: PixelFormat, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .rgb:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .bgr:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .rgba:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .bgra:
+            writeInt(&buf, Int32(4))
+        
+        
+        case .argb:
+            writeInt(&buf, Int32(5))
+        
+        
+        case .yuv420:
+            writeInt(&buf, Int32(6))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePixelFormat_lift(_ buf: RustBuffer) throws -> PixelFormat {
+    return try FfiConverterTypePixelFormat.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePixelFormat_lower(_ value: PixelFormat) -> RustBuffer {
+    return FfiConverterTypePixelFormat.lower(value)
+}
+
+
+
+extension PixelFormat: Equatable, Hashable {}
 
 
 
@@ -2648,6 +3166,99 @@ public func FfiConverterTypeWaveformMode_lower(_ value: WaveformMode) -> RustBuf
 
 
 extension WaveformMode: Equatable, Hashable {}
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * YUV to RGB conversion matrix and range, for [`PixelFormat::Yuv420`].
+ */
+
+public enum YuvMatrix {
+    
+    /**
+     * BT.601, limited range (Y 16-235). Typical for decoded SD video.
+     */
+    case bt601Limited
+    /**
+     * BT.601, full range (JFIF). Typical for Android camera `YUV_420_888`.
+     */
+    case bt601Full
+    /**
+     * BT.709, limited range. Typical for decoded HD video.
+     */
+    case bt709Limited
+    /**
+     * BT.709, full range.
+     */
+    case bt709Full
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeYuvMatrix: FfiConverterRustBuffer {
+    typealias SwiftType = YuvMatrix
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> YuvMatrix {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .bt601Limited
+        
+        case 2: return .bt601Full
+        
+        case 3: return .bt709Limited
+        
+        case 4: return .bt709Full
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: YuvMatrix, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .bt601Limited:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .bt601Full:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .bt709Limited:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .bt709Full:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeYuvMatrix_lift(_ buf: RustBuffer) throws -> YuvMatrix {
+    return try FfiConverterTypeYuvMatrix.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeYuvMatrix_lower(_ value: YuvMatrix) -> RustBuffer {
+    return FfiConverterTypeYuvMatrix.lower(value)
+}
+
+
+
+extension YuvMatrix: Equatable, Hashable {}
 
 
 
@@ -2994,6 +3605,56 @@ fileprivate struct FfiConverterSequenceTypeBufferMetadata: FfiConverterRustBuffe
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeFramePlane: FfiConverterRustBuffer {
+    typealias SwiftType = [FramePlane]
+
+    public static func write(_ value: [FramePlane], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFramePlane.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FramePlane] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FramePlane]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFramePlane.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeFramePlaneAddress: FfiConverterRustBuffer {
+    typealias SwiftType = [FramePlaneAddress]
+
+    public static func write(_ value: [FramePlaneAddress], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeFramePlaneAddress.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [FramePlaneAddress] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [FramePlaneAddress]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeFramePlaneAddress.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceSequenceFloat: FfiConverterRustBuffer {
     typealias SwiftType = [[Float]]
 
@@ -3177,6 +3838,46 @@ public func isContained(inner: Rect, outer: Rect, minOverlapPct: Float) -> Bool 
     )
 })
 }
+/**
+ * Same as [`prepare_frame_from_planes`], but reads the planes in place from native memory
+ * (zero copy). Each address must point to `length` readable bytes that stay valid and
+ * unchanged until the call returns; only bytes within that length are read.
+ */
+public func prepareFrameFromAddresses(planes: [FramePlaneAddress], width: UInt32, height: UInt32, format: PixelFormat, yuvMatrix: YuvMatrix, crop: PixelRect, outWidth: UInt32, outHeight: UInt32, orientation: Orientation)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFrameError.lift) {
+    uniffi_vitallens_core_fn_func_prepare_frame_from_addresses(
+        FfiConverterSequenceTypeFramePlaneAddress.lower(planes),
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterTypePixelFormat.lower(format),
+        FfiConverterTypeYuvMatrix.lower(yuvMatrix),
+        FfiConverterTypePixelRect.lower(crop),
+        FfiConverterUInt32.lower(outWidth),
+        FfiConverterUInt32.lower(outHeight),
+        FfiConverterTypeOrientation.lower(orientation),$0
+    )
+})
+}
+/**
+ * Crops, area-averages, converts and orients a frame to packed RGB model input
+ * (`out_width * out_height * 3` bytes). Planes are copied across the FFI; for camera frames
+ * prefer [`prepare_frame_from_addresses`].
+ */
+public func prepareFrameFromPlanes(planes: [FramePlane], width: UInt32, height: UInt32, format: PixelFormat, yuvMatrix: YuvMatrix, crop: PixelRect, outWidth: UInt32, outHeight: UInt32, orientation: Orientation)throws  -> Data {
+    return try  FfiConverterData.lift(try rustCallWithError(FfiConverterTypeFrameError.lift) {
+    uniffi_vitallens_core_fn_func_prepare_frame_from_planes(
+        FfiConverterSequenceTypeFramePlane.lower(planes),
+        FfiConverterUInt32.lower(width),
+        FfiConverterUInt32.lower(height),
+        FfiConverterTypePixelFormat.lower(format),
+        FfiConverterTypeYuvMatrix.lower(yuvMatrix),
+        FfiConverterTypePixelRect.lower(crop),
+        FfiConverterUInt32.lower(outWidth),
+        FfiConverterUInt32.lower(outHeight),
+        FfiConverterTypeOrientation.lower(orientation),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -3209,6 +3910,12 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_func_is_contained() != 26927) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vitallens_core_checksum_func_prepare_frame_from_addresses() != 26637) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vitallens_core_checksum_func_prepare_frame_from_planes() != 27627) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_method_bufferplanner_evaluate_target() != 53374) {
