@@ -3,6 +3,7 @@ pub mod signal;
 pub mod state;
 pub mod types;
 pub mod geometry;
+pub mod image;
 mod bindings;
 
 pub use state::session::Session;

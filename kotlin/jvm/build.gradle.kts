@@ -65,6 +65,8 @@ kotlin {
             // Same generated sources as the Android AAR (../android/build.gradle.kts)
             // — UniFFI bindings don't change per native target.
             kotlin.srcDir("../../bindings/kotlin")
+            // Hand-written companions to the generated bindings (e.g. the prepareFrame fast path).
+            kotlin.srcDir("../src")
             // JNA desktop resource layout: nativeLibs/<os-arch>/libvitallens_core.<ext>.
             // `make build-jvm` (local, macOS dev machine) only populates the
             // darwin-aarch64/darwin-x86-64 slices. The published artifact also

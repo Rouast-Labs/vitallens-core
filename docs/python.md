@@ -114,3 +114,20 @@ meta = vc.get_vital_info("heart_rate")
 print(f"Vital ID: {meta.id}, Display Name: {meta.display_name}, Unit: {meta.unit}")
 print(f"vitallens-core {vc.core_version()}")  # also vc.__version__
 ```
+
+## Frame Preparation
+
+Crops a frame to the ROI, converts it to RGB, area-averages it down to the model input size, then rotates and mirrors it, in one pass. Each output pixel is the exact mean of the source pixels it covers, with partially covered pixels weighted by their covered fraction (like OpenCV `INTER_AREA`); integer arithmetic gives identical bytes on every platform. The crop is in pixels of the raw (unrotated) frame, the output size is the size after rotation, rotation is clockwise (0, 90, 180, 270), then mirroring. The result is packed RGB bytes (`out_width * out_height * 3`, row-major).
+
+Formats: `"rgb"`, `"bgr"` (c >= 3) and `"rgba"`, `"bgra"`, `"argb"` (c >= 4) for `uint8` arrays of shape (h, w, c).
+
+Arrays are read in place (any strides, contiguous channels) and the GIL is released, so slicing out the crop first is unnecessary. `prepare_frames` processes a whole video in one call.
+
+```python
+frame = np.zeros((720, 1280, 3), dtype=np.uint8)  # (h, w, c)
+out = vc.prepare_frame(frame, crop=(400, 120, 480, 480), size=(40, 40), format="rgb")  # (40, 40, 3)
+
+video = np.zeros((30, 720, 1280, 3), dtype=np.uint8)  # (n, h, w, c)
+crops = np.array([[400, 120, 480, 480]])  # (n, 4) per frame, or (1, 4) for all frames
+outs = vc.prepare_frames(video, crops, size=(40, 40), rotation=0, mirrored=False)  # (30, 40, 40, 3)
+```
