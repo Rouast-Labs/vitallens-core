@@ -769,6 +769,189 @@ public func FfiConverterTypeBufferPlanner_lower(_ value: BufferPlanner) -> Unsaf
 
 
 /**
+ * Keeps the last detected face through short gaps in face detection.
+ *
+ * Live face detection misses a face now and then, for example on a blink, a turn of the head,
+ * or a frame the detector doesn't handle. `FaceHold` returns the last detected face until
+ * detections have found no face for longer than the hold time, and only then reports no face.
+ */
+public protocol FaceHoldProtocol : AnyObject {
+    
+    /**
+     * Forgets the last detected face.
+     */
+    func reset() 
+    
+    /**
+     * Registers the result of one face detection and returns the face to use.
+     *
+     * # Arguments
+     * * `face` - The detected face, or `None` if the detection found no face.
+     * * `timestamp` - The time of the detected frame, in seconds. A time earlier than the last
+     * detected face starts afresh.
+     *
+     * # Returns
+     * The detected face, the last detected face if it was seen within the hold time, or `None`.
+     */
+    func update(face: Rect?, timestamp: Double)  -> Rect?
+    
+}
+
+/**
+ * Keeps the last detected face through short gaps in face detection.
+ *
+ * Live face detection misses a face now and then, for example on a blink, a turn of the head,
+ * or a frame the detector doesn't handle. `FaceHold` returns the last detected face until
+ * detections have found no face for longer than the hold time, and only then reports no face.
+ */
+open class FaceHold:
+    FaceHoldProtocol {
+    fileprivate let pointer: UnsafeMutableRawPointer!
+
+    /// Used to instantiate a [FFIObject] without an actual pointer, for fakes in tests, mostly.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public struct NoPointer {
+        public init() {}
+    }
+
+    // TODO: We'd like this to be `private` but for Swifty reasons,
+    // we can't implement `FfiConverter` without making this `required` and we can't
+    // make it `required` without making it `public`.
+    required public init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        self.pointer = pointer
+    }
+
+    // This constructor can be used to instantiate a fake object.
+    // - Parameter noPointer: Placeholder value so we can have a constructor separate from the default empty one that may be implemented for classes extending [FFIObject].
+    //
+    // - Warning:
+    //     Any object instantiated with this constructor cannot be passed to an actual Rust-backed object. Since there isn't a backing [Pointer] the FFI lower functions will crash.
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public init(noPointer: NoPointer) {
+        self.pointer = nil
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public func uniffiClonePointer() -> UnsafeMutableRawPointer {
+        return try! rustCall { uniffi_vitallens_core_fn_clone_facehold(self.pointer, $0) }
+    }
+    /**
+     * Creates a face hold. Without `hold_seconds`, it uses `DEFAULT_FACE_HOLD_SECONDS`.
+     */
+public convenience init(holdSeconds: Double?) {
+    let pointer =
+        try! rustCall() {
+    uniffi_vitallens_core_fn_constructor_facehold_new(
+        FfiConverterOptionDouble.lower(holdSeconds),$0
+    )
+}
+    self.init(unsafeFromRawPointer: pointer)
+}
+
+    deinit {
+        guard let pointer = pointer else {
+            return
+        }
+
+        try! rustCall { uniffi_vitallens_core_fn_free_facehold(pointer, $0) }
+    }
+
+    
+
+    
+    /**
+     * Forgets the last detected face.
+     */
+open func reset() {try! rustCall() {
+    uniffi_vitallens_core_fn_method_facehold_reset(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * Registers the result of one face detection and returns the face to use.
+     *
+     * # Arguments
+     * * `face` - The detected face, or `None` if the detection found no face.
+     * * `timestamp` - The time of the detected frame, in seconds. A time earlier than the last
+     * detected face starts afresh.
+     *
+     * # Returns
+     * The detected face, the last detected face if it was seen within the hold time, or `None`.
+     */
+open func update(face: Rect?, timestamp: Double) -> Rect? {
+    return try!  FfiConverterOptionTypeRect.lift(try! rustCall() {
+    uniffi_vitallens_core_fn_method_facehold_update(self.uniffiClonePointer(),
+        FfiConverterOptionTypeRect.lower(face),
+        FfiConverterDouble.lower(timestamp),$0
+    )
+})
+}
+    
+
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeFaceHold: FfiConverter {
+
+    typealias FfiType = UnsafeMutableRawPointer
+    typealias SwiftType = FaceHold
+
+    public static func lift(_ pointer: UnsafeMutableRawPointer) throws -> FaceHold {
+        return FaceHold(unsafeFromRawPointer: pointer)
+    }
+
+    public static func lower(_ value: FaceHold) -> UnsafeMutableRawPointer {
+        return value.uniffiClonePointer()
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FaceHold {
+        let v: UInt64 = try readInt(&buf)
+        // The Rust code won't compile if a pointer won't fit in a UInt64.
+        // We have to go via `UInt` because that's the thing that's the size of a pointer.
+        let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
+        if (ptr == nil) {
+            throw UniffiInternalError.unexpectedNullPointer
+        }
+        return try lift(ptr!)
+    }
+
+    public static func write(_ value: FaceHold, into buf: inout [UInt8]) {
+        // This fiddling is because `Int` is the thing that's the same size as a pointer.
+        // The Rust code won't compile if a pointer won't fit in a `UInt64`.
+        writeInt(&buf, UInt64(bitPattern: Int64(Int(bitPattern: lower(value)))))
+    }
+}
+
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFaceHold_lift(_ pointer: UnsafeMutableRawPointer) throws -> FaceHold {
+    return try FfiConverterTypeFaceHold.lift(pointer)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeFaceHold_lower(_ value: FaceHold) -> UnsafeMutableRawPointer {
+    return FfiConverterTypeFaceHold.lower(value)
+}
+
+
+
+
+/**
  * A thread-safe, stateful session object for processing continuous frame data natively across FFI and Wasm.
  */
 public protocol SessionProtocol : AnyObject {
@@ -3289,6 +3472,30 @@ fileprivate struct FfiConverterOptionFloat: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionDouble: FfiConverterRustBuffer {
+    typealias SwiftType = Double?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterDouble.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterDouble.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionBool: FfiConverterRustBuffer {
     typealias SwiftType = Bool?
 
@@ -3927,6 +4134,12 @@ private var initializationResult: InitializationResult = {
     if (uniffi_vitallens_core_checksum_method_bufferplanner_poll() != 59925) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_vitallens_core_checksum_method_facehold_reset() != 5795) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vitallens_core_checksum_method_facehold_update() != 49850) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_vitallens_core_checksum_method_session_process() != 23803) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3934,6 +4147,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_constructor_bufferplanner_new() != 8442) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_vitallens_core_checksum_constructor_facehold_new() != 5155) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_vitallens_core_checksum_constructor_session_new() != 38741) {
