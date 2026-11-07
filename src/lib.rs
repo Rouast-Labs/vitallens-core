@@ -7,6 +7,7 @@ pub mod image;
 mod bindings;
 
 pub use state::session::Session;
+pub use state::face::FaceHold;
 pub use types::{SessionConfig, SessionInput, WaveformMode, SessionResult, VitalInfo};
 
 #[cfg(target_arch = "wasm32")]
@@ -82,6 +83,7 @@ fn vitallens_core(m: &pyo3::Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<types::ExecutionPlan>()?;    
     m.add_class::<types::VitalInfo>()?;
     m.add_class::<state::frames::BufferPlanner>()?;
+    m.add_class::<state::face::FaceHold>()?;
 
     bindings::python::register_functions(m)?;
     m.add("__version__", core_version())?;
